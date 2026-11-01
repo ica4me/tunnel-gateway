@@ -9,6 +9,7 @@
     - /usr/local/bin/badvpn-udpgw
     - /usr/local/sbin/tunnelctl
     - /usr/local/sbin/menu
+    - /usr/local/sbin/tunnel-domain-change
     - /usr/local/sbin/tunnel-cert-deploy
     - /etc/haproxy/haproxy.cfg
     - /etc/haproxy/classifier.lua

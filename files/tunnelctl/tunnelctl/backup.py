@@ -57,6 +57,9 @@ def create_backup(settings, source_root='/', run_cmd=None, output=None):
     name = 'tunnel-backup-{}-{}-{}'.format(hostname, stamp, uuid.uuid4().hex[:8])
     recipient = settings.get('backup_age_recipient') or settings.get('backup_age_recipient_value')
     recipients_file = settings.get('backup_age_recipients_file') or settings.get('backup_age_key_file')
+    if recipients_file and not (Path(recipients_file).is_file() and Path(recipients_file).stat().st_size > 0):
+        # No age recipient installed yet: write an unencrypted archive; the CLI warns the operator.
+        recipients_file = None
     if settings.get('backup_passphrase') and not recipient and not recipients_file:
         raise InputError('Backup otomatis memakai kunci age; passphrase interaktif tidak didukung')
     encrypted = bool(recipient or recipients_file)

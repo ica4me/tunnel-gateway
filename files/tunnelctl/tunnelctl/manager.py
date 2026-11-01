@@ -81,7 +81,8 @@ class Manager:
         duration = hours if hours is not None else (self.settings['defaults']['trial_hours'] if trial else (days if days is not None else self.settings['defaults']['days']))
         if not isinstance(duration,int) or duration <= 0:
             raise InputError('Masa aktif harus bilangan bulat positif')
-        quota = self._constraints(protocol, quota if quota is not None else self.settings['defaults']['quota_bytes'], limit)
+        default_quota = 0 if protocol == 'ssh' else self.settings['defaults']['quota_bytes']
+        quota = self._constraints(protocol, quota if quota is not None else default_quota, limit)
         secret = util_module.validate_secret(protocol, secret if secret is not None or protocol in ('vmess','vless') else secrets.token_urlsafe(24))
         now = self.clock()
         expiry = now + (datetime.timedelta(hours=duration) if trial or hours is not None else datetime.timedelta(days=duration))

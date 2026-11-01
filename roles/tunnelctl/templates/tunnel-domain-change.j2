@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+# Managed by Ansible. Change the gateway domain on this server by re-running the pinned playbooks.
+REPO_DIR = '{{ tunnelctl_repo_dir }}'
+INVENTORY = '{{ inventory_file }}'
+ANSIBLE_BIN = '{{ ansible_playbook_python | dirname }}'
+{% raw %}
+import argparse
+import datetime
+import fcntl
+import os
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import urllib.request
+import uuid
+from pathlib import Path
+
+DOMAIN_RE = re.compile(r'^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
+DOMAIN_LINE = re.compile(r'^(\s*tunnel_domain:\s*)(["\']?)([^"\'\s#]+)(["\']?)(.*)$', re.M)
+PLAYBOOKS = ('prepare-server', 'site', 'commit-server')
+ACME_ROOT = Path('/var/www/tunnel-acme')
+LOCK_PATH = '/run/tunnel/domain-change.lock'
+
+
+def say(text=''):
+    try:
+        print(text, flush=True)
+    except (OSError, ValueError):
+        pass  # terminal closed; keep working, everything is also in the log files
+
+
+def die(text):
+    say('GAGAL: ' + text)
+    sys.exit(1)
+
+
+def public_ip():
+    try:
+        request = urllib.request.Request('https://ipinfo.io/ip', headers={'User-Agent': 'tunnel-domain-change'})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            value = response.read().decode().strip()
+        socket.inet_aton(value)
+        return value
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(['ip', '-4', 'route', 'get', '1.1.1.1'], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ''
+    match = re.search(r'\bsrc\s+(\S+)', out)
+    return match.group(1) if match else ''
+
+
+def resolve(domain):
+    try:
+        return sorted(set(item[4][0] for item in socket.getaddrinfo(domain, None, socket.AF_INET)))
+    except OSError:
+        return []
+
+
+def http_check(domain):
+    """Prove http://DOMAIN/.well-known/acme-challenge/ reaches this server (what Let's Encrypt will use)."""
+    directory = ACME_ROOT / '.well-known' / 'acme-challenge'
+    directory.mkdir(parents=True, exist_ok=True)
+    for path in (ACME_ROOT, ACME_ROOT / '.well-known', directory):
+        os.chmod(str(path), 0o755)
+    token = 'tg-check-' + uuid.uuid4().hex
+    body = uuid.uuid4().hex
+    target = directory / token
+    target.write_text(body)
+    os.chmod(str(target), 0o644)
+    try:
+        url = 'http://{0}/.well-known/acme-challenge/{1}'.format(domain, token)
+        with urllib.request.urlopen(url, timeout=15) as response:
+            return response.read().decode().strip() == body
+    except Exception:
+        return False
+    finally:
+        try:
+            target.unlink()
+        except OSError:
+            pass
+
+
+def run_playbook(name, log_dir, stamp, label):
+    log_path = log_dir / 'domain-{0}-{1}-{2}.log'.format(stamp, label, name)
+    command = [os.path.join(ANSIBLE_BIN, 'ansible-playbook'), '-i', INVENTORY, 'playbooks/{0}.yml'.format(name)]
+    env = dict(os.environ, ANSIBLE_NOCOLOR='1', ANSIBLE_FORCE_COLOR='0', PYTHONUNBUFFERED='1')
+    say('')
+    say('>>> {0}.yml   (log lengkap: {1})'.format(name, log_path))
+    with open(str(log_path), 'w') as handle:
+        # New session: Ctrl+C or a closed terminal must not interrupt Ansible half-way.
+        process = subprocess.Popen(command, cwd=REPO_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   text=True, env=env, start_new_session=True)
+        for line in process.stdout:
+            handle.write(line)
+            handle.flush()
+            text = line.rstrip()
+            if text.startswith('TASK ['):
+                say('    ' + text[6:].split('] *')[0][:72])
+            elif text.startswith(('fatal:', 'failed:', 'ERROR', '[ERROR]', 'PLAY RECAP')) or ' failed=' in text:
+                say('    ' + text[:400])
+        return process.wait() == 0
+
+
+def run_all(log_dir, stamp, label):
+    for name in PLAYBOOKS:
+        if not run_playbook(name, log_dir, stamp, label):
+            say('    -> {0}.yml GAGAL'.format(name))
+            return False
+    return True
+
+
+def cert_end(domain):
+    try:
+        out = subprocess.run(['openssl', 'x509', '-in', '/etc/haproxy/certs/{0}.pem'.format(domain), '-noout', '-enddate'],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        out = ''
+    return out.split('=', 1)[-1] if out else '-'
+
+
+def forget_old_acme(old):
+    scripts = sorted(Path('/opt/tunnel').glob('acme-source-*/acme.sh'))
+    if scripts and Path('/etc/tunnel/acme/{0}_ecc'.format(old)).exists():
+        subprocess.run([str(scripts[-1]), '--remove', '-d', old, '--ecc', '--home', '/opt/tunnel/acme',
+                        '--config-home', '/etc/tunnel/acme'], capture_output=True)
+        say('Perpanjangan otomatis sertifikat domain lama ({0}) dihentikan.'.format(old))
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Ganti domain tunnel gateway di server ini lewat Ansible.')
+    parser.add_argument('domain')
+    parser.add_argument('--yes', action='store_true', help='tanpa pertanyaan konfirmasi')
+    parser.add_argument('--skip-dns-check', action='store_true', help='lewati cek DNS dan HTTP (mis. Cloudflare proxied)')
+    args = parser.parse_args()
+
+    if os.geteuid() != 0:
+        die('jalankan sebagai root.')
+    Path(LOCK_PATH).parent.mkdir(parents=True, exist_ok=True)
+    lock = open(LOCK_PATH, 'w')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        die('proses ganti domain lain sedang berjalan.')
+    signal.signal(signal.SIGINT, lambda *_: say('\n(Ctrl+C diabaikan: proses sedang berjalan, tunggu sampai selesai.)'))
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+    new = args.domain.strip().lower().rstrip('.')
+    if not DOMAIN_RE.match(new):
+        die('format domain tidak valid: {0}'.format(new))
+    inventory = Path(INVENTORY)
+    text = inventory.read_text()
+    found = DOMAIN_LINE.findall(text)
+    if len(found) != 1:
+        die('tunnel_domain harus muncul tepat satu kali di {0} (ditemukan {1}).'.format(INVENTORY, len(found)))
+    old = found[0][2]
+    if old == new:
+        say('Domain sudah {0}; tidak ada yang diubah.'.format(new))
+        return 0
+    new_text = DOMAIN_LINE.sub(lambda m: m.group(1) + m.group(2) + new + m.group(4) + m.group(5), text, count=1)
+    leftovers = [line.strip() for line in new_text.splitlines()
+                 if not line.strip().startswith('#') and (
+                     old in line
+                     or (re.match(r'^\s+domain:', line) and 'tunnel_domain' not in line)
+                     or ('/etc/haproxy/certs/' in line and 'tunnel_domain' not in line))]
+    if leftovers:
+        die('domain lama masih tertulis langsung di inventory; ganti dengan "{{ tunnel_domain }}" lalu ulangi:\n  '
+            + '\n  '.join(leftovers))
+
+    ip = public_ip()
+    addresses = resolve(new)
+    say('Domain lama : {0}'.format(old))
+    say('Domain baru : {0}'.format(new))
+    say('IP server   : {0}'.format(ip or '-'))
+    say('DNS A baru  : {0}'.format(', '.join(addresses) or 'tidak ditemukan'))
+    if not args.skip_dns_check:
+        if not ip or ip not in addresses:
+            die('DNS {0} belum mengarah ke {1}. Arahkan A record (Cloudflare: DNS only) lalu tunggu propagasi.'.format(new, ip or 'IP server'))
+        say('Cek akses HTTP port 80 lewat domain baru ...')
+        if not http_check(new):
+            die('http://{0}/.well-known/acme-challenge/ tidak sampai ke server ini (cek DNS, proxy Cloudflare, port 80).'.format(new))
+        say('Cek DNS dan HTTP: OK')
+
+    if not args.yes:
+        answer = input('Lanjutkan ganti domain ke {0}? [y/N]: '.format(new)).strip().lower()
+        if answer not in ('y', 'ya', 'yes'):
+            say('Dibatalkan.')
+            return 0
+
+    stamp = datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+    backup = inventory.with_name(inventory.name + '.bak-' + stamp)
+    shutil.copy2(str(inventory), str(backup))
+    inventory.write_text(new_text)
+    log_dir = Path(REPO_DIR) / 'logs'
+    log_dir.mkdir(exist_ok=True)
+    say('Inventory diperbarui (cadangan: {0}).'.format(backup))
+    say('Menjalankan prepare -> site -> commit. Perkiraan 3-10 menit; port 443 sempat terputus saat sertifikat diterbitkan.')
+
+    if run_all(log_dir, stamp, 'apply'):
+        forget_old_acme(old)
+        say('')
+        say('=' * 60)
+        say('BERHASIL: domain sekarang {0}'.format(new))
+        say('Sertifikat berlaku sampai: {0}'.format(cert_end(new)))
+        say('Link akun memakai domain baru; bagikan ulang ke pelanggan (menu Detail akun).')
+        say('=' * 60)
+        return 0
+
+    say('')
+    say('Terjadi kegagalan. Mengembalikan domain lama ({0}) ...'.format(old))
+    shutil.copy2(str(backup), str(inventory))
+    if run_all(log_dir, stamp, 'rollback'):
+        say('')
+        say('ROLLBACK BERHASIL: server kembali memakai {0}. Periksa log di {1}.'.format(old, log_dir))
+    else:
+        say('')
+        say('ROLLBACK GAGAL. Jalankan manual dari {0}:'.format(REPO_DIR))
+        for name in PLAYBOOKS:
+            say('  {0}/ansible-playbook -i {1} playbooks/{2}.yml'.format(ANSIBLE_BIN, INVENTORY, name))
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+{% endraw %}

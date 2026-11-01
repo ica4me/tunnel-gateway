@@ -5,3 +5,5 @@ tunnelctl_wrapper: /usr/local/sbin/tunnelctl
 tunnelctl_menu_wrapper: /usr/local/sbin/menu
 tunnelctl_settings: {}
 tunnelctl_integration_approved: false
+# Repo location used by the local domain-change helper (local deployments only).
+tunnelctl_repo_dir: "{{ (playbook_dir ~ '/..') | realpath }}"

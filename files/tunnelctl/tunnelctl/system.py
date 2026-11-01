@@ -95,7 +95,7 @@ def generate_xray(base_config, accounts, settings):
 
 class SystemBackend:
     require_root = True
-    SERVICES = ('haproxy', 'xray', 'ws-epro', 'dropbear-tunnel', 'nginx', 'chrony', 'nftables', 'vnstat')
+    SERVICES = ('haproxy', 'xray', 'ws-epro', 'dropbear-tunnel', 'nginx', 'chrony', 'tunnel-firewall', 'vnstat')
     TIMERS = ('tunnel-usage.timer', 'tunnel-limit.timer', 'tunnel-expiry.timer', 'tunnel-backup.timer', 'tunnel-cert.timer')
 
     def __init__(self, runner=None, check_root=True):
@@ -239,7 +239,15 @@ class SystemBackend:
 
     def xray_online_ips(self, account):
         email = account['username'] + '@' + account['protocol']
-        out = self.runner(['xray', 'api', 'statsonlineiplist', '--server=' + self.settings.get('xray_api', '127.0.0.1:10085'), '-email', email])
+        try:
+            out = self.runner(['xray', 'api', 'statsonlineiplist', '--server=' + self.settings.get('xray_api', '127.0.0.1:10085'), '-email', email])
+        except TunnelCtlError as exc:
+            cause = exc.__cause__
+            detail = ' '.join(str(getattr(cause, k, '') or '') for k in ('stderr', 'stdout')).lower()
+            if 'not found' in detail:
+                # No online record since Xray last started: the user is offline.
+                return []
+            raise
         if out.strip().startswith('{'):
             parsed = json.loads(out)
             ips = parsed.get('ips', {})
@@ -331,7 +339,11 @@ class SystemBackend:
             if account['protocol'] == 'ssh':
                 item['sessions'] = sessions.get(account['username'], 0)
             else:
-                item['ips'] = self.xray_online_ips(account)
+                try:
+                    item['ips'] = self.xray_online_ips(account)
+                except TunnelCtlError:
+                    item['ips'] = []
+                    item['error'] = 'xray_api'
             result.append(item)
         return result
 
@@ -379,6 +391,7 @@ class SystemBackend:
             loopback = set()
             allowed = expected | {int(settings.get('ssh_admin_port', 22))}
             allowed.update(int(p) for p in settings.get('extra_http_ports', []) + settings.get('extra_https_ports', []))
+            allowed.update(int(p) for p in settings.get('ssh_admin_extra_ports', []))
             for line in raw.splitlines():
                 fields = line.split()
                 if len(fields) < 4 or fields[0] != 'LISTEN': continue
@@ -507,7 +520,9 @@ class SystemBackend:
         self.runner(['journalctl', '--vacuum-time=7d'])
         for log in (Path('/var/log/xray/access.log'), Path('/var/log/xray/error.log')):
             if log.exists() and not log.is_symlink():
-                atomic_write(log, b'')
+                # Truncate in place: Xray keeps its file descriptor, so replacing the file would hide new logs.
+                with open(str(log), 'r+b') as handle:
+                    handle.truncate(0)
         return {'cleaned': True}
 
     def timers(self, action):

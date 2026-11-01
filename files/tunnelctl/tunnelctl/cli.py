@@ -469,7 +469,10 @@ def run(argv=None, settings_override=None, backend=None):
             backup = Backup(manager)
             if cmd == 'create':
                 out = backup.create(output=args.output)
-                _print({'file': str(out)}, as_json=args.json)
+                data = {'file': str(out), 'encrypted': str(out).endswith('.age')}
+                if not data['encrypted']:
+                    data['warning'] = 'Backup TIDAK terenkripsi (kunci age belum dipasang). File berisi password/UUID akun; simpan di tempat aman.'
+                _print(data, as_json=args.json)
                 return EXIT_OK
             if cmd == 'list':
                 files = []

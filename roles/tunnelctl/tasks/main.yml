@@ -83,6 +83,19 @@
     group: root
     mode: '0755'
   when: tunnelctl_enabled | bool
+- name: Install domain-change helper (repo lives on this server only in local mode)
+  ansible.builtin.template:
+    src: tunnel-domain-change.j2
+    dest: /usr/local/sbin/tunnel-domain-change
+    owner: root
+    group: root
+    mode: '0700'
+  when: tunnelctl_enabled | bool and (ansible_connection | default('ssh')) == 'local'
+- name: Remove domain-change helper on remote-controller deployments
+  ansible.builtin.file:
+    path: /usr/local/sbin/tunnel-domain-change
+    state: absent
+  when: tunnelctl_enabled | bool and (ansible_connection | default('ssh')) != 'local'
 - name: Configure settings.json.j2
   ansible.builtin.template:
     src: settings.json.j2

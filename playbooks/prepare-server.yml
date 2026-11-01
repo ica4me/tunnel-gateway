@@ -47,7 +47,7 @@
           cp /etc/tunnel/nftables.conf /var/lib/tunnel/firewall-guard/previous.conf
         fi
         systemctl reset-failed tunnel-firewall-rollback.service 2>/dev/null || true
-        systemd-run --unit=tunnel-firewall-rollback --property=Type=oneshot --on-active=20m /etc/tunnel/firewall-rollback.sh
+        systemd-run --unit=tunnel-firewall-rollback --property=Type=oneshot --on-active=45m /etc/tunnel/firewall-rollback.sh
       when: prepare_guard.rc != 0
     - name: Verify timer is actually running
       ansible.builtin.command: systemctl is-active tunnel-firewall-rollback.timer

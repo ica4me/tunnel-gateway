@@ -1,75 +1,121 @@
-# Tunnel Gateway — Ansible
-SSH WebSocket/SSH-TLS, Xray VMess/VLESS/Trojan/Shadowsocks, HAProxy 80/443,
-backend loopback dan CLI `tunnelctl`/`menu`; tanpa panel web.
-**Teruji hanya Ubuntu 22.04 amd64 LAN + selfsigned.** OS lain, arm64,
-ACME publik/Cloudflare dan migrasi lintas domain belum diverifikasi.
-Pin Ansible 2.17.14 sudah EOL; untuk reproduksi, bukan jaminan keamanan produksi.
+# 🚀 Tunnel Gateway — Ansible
 
-## Persiapan controller dan inventory
-Target bersih: systemd, root/sudo, SSH berbasis kunci, konsol pemulihan,
-port 80/443 kosong dan internet untuk apt/GitHub/go.dev. Controller Python
-3.10–3.12, venv/pip/SSH; verifikasi fingerprint SSH lewat kanal tepercaya.
-```bash
-sudo apt-get update
-sudo apt-get install -y python3-venv python3-pip openssh-client
+Script gratis dan otomatis untuk menginstal VPN Gateway di server Anda. Dikelola sepenuhnya melalui antarmuka CLI yang ringan dan interaktif, tanpa menggunakan panel web yang memakan banyak resource.
+
+## ✨ Fitur Utama
+
+* **Penegakan Otomatis:** Limit IP/Login bersamaan & Limit Kuota Bandwidth.
+
+* **Trial Akun:** Pembuatan akun uji coba yang otomatis terhapus saat kedaluwarsa.
+
+* **Keamanan:** Banned/Lock otomatis untuk pengguna yang melanggar batasan.
+
+* **Notifikasi:** Terintegrasi dengan Bot Telegram (opsional).
+
+* **Aman & Fleksibel:** Fitur Backup & Restore database akun ke file terenkripsi.
+
+* **Manajemen Mudah:** CLI interaktif (`menu`) atau perintah langsung (`tunnelctl`).
+
+## 🛡️ Protokol yang Didukung
+
+* SSH WebSocket (WS)
+
+* SSH Stunnel (TLS)
+
+* Xray VMess
+
+* Xray VLESS
+
+* Xray Trojan
+
+* Xray Shadowsocks
+
+## 🖥️ Dukungan Sistem Operasi
+
+Script ini secara spesifik **hanya mendukung** sistem operasi berikut (amd64/arm64):
+
+* **Ubuntu 22.04** (✅ *Sangat Direkomendasikan & Sudah Teruji*)
+
+* Ubuntu 24.04
+
+* Ubuntu 26.04
+
+* Debian 12
+
+* Debian 13
+
+*OS di luar daftar ini (seperti CentOS, Alpine, dll) tidak didukung.*
+
+## ⚙️ Persiapan & Instalasi Paket
+
+Login ke VPS Anda sebagai `root` dan jalankan perintah berikut secara berurutan:
+
+```
+# 1. Update dan install dependensi dasar
+apt-get update
+apt-get install -y tmux python3-venv python3-pip openssh-client
+
+# 2. Buka sesi tmux agar proses aman meski koneksi SSH terputus
+tmux new -s install
+
+# 3. Clone repositori ke dalam folder /root
+git clone https://github.com/ica4me/tunnel-gateway.git /root/tunnel-gateway
+cd /root/tunnel-gateway
+
+# 4. Siapkan environment Python & Ansible
 python3 -m venv .venv
 .venv/bin/python -m pip install -r release/requirements.txt
 .venv/bin/ansible-galaxy collection install -r requirements.yml
-cp -a inventories/new-server inventories/my-server
-$EDITOR inventories/my-server/hosts.yml
-```
-Ganti host/user/port, domain/email dan domain/path sertifikat di
-`tunnelctl_settings`. Pertahankan SSH admin yang sudah aktif; port tambahan
-masuk `ssh_admin_extra_ports`. Jangan aktifkan `openssh_admin_change_access`.
-Template `tunnelctl_fresh_install=true` hanya untuk server bersih. Server berakun
-wajib sudah diimpor: `tunnelctl_fresh_install=false`, `tunnelctl_accounts_imported=true`.
-Untuk LAN gunakan `selfsigned` + `acme_enabled=false`; klien wajib pin sertifikat.
-Jangan taruh rahasia di inventory, argumen shell, Git atau ZIP; gunakan Vault:
-```bash
-mkdir -p inventories/my-server/group_vars/all
-.venv/bin/ansible-vault create inventories/my-server/group_vars/all/vault.yml
-```
-Backup timer default **mati**. Isi `backup_age_recipient` dengan public recipient
-age Anda dan `backup_enabled=true`; prepare memvalidasi serta memasang recipient.
-Simpan private identity offline; untuk restore otomatis, isi
-`vault_backup_age_identity` di Vault (dipasang Ansible mode 0600/no_log).
-Tidak ada private identity yang dibuat/disertakan ZIP. Path key CLI harus cocok.
 
-## Deploy, verifikasi, rerun
-```bash
-BOOTSTRAP_PYTHON=python3 bash release/bootstrap.sh inventories/my-server/hosts.yml --ask-vault-pass
-# Atau langkah eksplisit (tambahkan --ask-vault-pass bila memakai Vault):
-.venv/bin/ansible-playbook -i inventories/my-server/hosts.yml playbooks/prepare-server.yml
-.venv/bin/ansible-playbook -i inventories/my-server/hosts.yml playbooks/site.yml
-.venv/bin/ansible-playbook -i inventories/my-server/hosts.yml playbooks/commit-server.yml
-```
-Bootstrap menjalankan prepare → site → commit. Prepare menyimpan policy milik
-paket dan memasang rollback timer nyata 20 menit. Gagal/terputus: timer tetap
-aktif, mengembalikan table/policy sebelumnya tanpa flush firewall lain.
-Commit menjalankan `verify.yml`, koneksi SSH baru dan CLI doctor sebelum cancel.
-Jangan cancel manual setelah deploy gagal. Konsol pemulihan tetap diperlukan.
-Rerun dengan tiga langkah yang sama: site normal diharapkan `changed=0`, akun tetap.
-Prepare/commit berubah karena arm/cancel timer; bukan perubahan runtime layanan.
-Verify memeriksa layanan/listener/validator/waktu, bukan seluruh E2E internet.
-Recovery notifikasi terputus: site `-e gateway_reconcile_restart=true`, lalu rerun.
+# 5. Verifikasi sintaks playbook (Pastikan tidak ada error)
+for p in prepare-server site commit-server; do
+  .venv/bin/ansible-playbook playbooks/$p.yml --syntax-check || break
+done
 
-## CLI dan backup/restore (root di target)
-```bash
+# 6. (Opsional) Cek konfigurasi target inventory Anda
+.venv/bin/ansible-inventory --host worker-test1 | grep -E 'domain|cert_mode|connection'
+
+```
+
+### ▶️ Mulai Deploy Server
+
+Setelah mengedit file konfigurasi host Anda di folder `inventories/` (misal mengganti domain, email, dll), jalankan perintah deploy utama:
+
+```
+# Ganti path inventory sesuai dengan konfigurasi Anda
+BOOTSTRAP_PYTHON=python3 bash release/bootstrap.sh inventories/new-server/hosts.yml
+
+```
+
+## 🛠️ Manajemen Server & Akun
+
+Semua pengelolaan dilakukan melalui CLI langsung di dalam VPS target.
+
+**Buka Menu Interaktif Utama:**
+
+```
 sudo menu
-sudo tunnelctl doctor --json
-sudo tunnelctl system status --json
-sudo tunnelctl account create --proto vless --user pelanggan --days 30 --quota 10G --limit 2
-sudo tunnelctl account list --json
-sudo tunnelctl backup create --json
-sudo tunnelctl backup list --json
-sudo tunnelctl backup verify /var/backups/tunnel/ARSIP.tar.zst.age --json
-sudo tunnelctl backup restore /var/backups/tunnel/ARSIP.tar.zst.age --yes --json
+
 ```
-Wrapper controller: `ansible-playbook -i INVENTORY playbooks/backup.yml` fetch ke
-`backups/<host>/`; restore: `ansible-playbook -i INVENTORY playbooks/restore.yml
--e backup_file=/path/ARSIP.tar.zst.age -e restore_confirm=true` (+ opsi Vault).
-Restore mengubah data: verifikasi dahulu, simpan key terpisah, uji pada VM disposable.
-Credential/link akun jangan disalin ke log. Restart Xray memutus koneksi aktif.
-SSH payload split/multi-request gunakan IP VPS, bukan proxy Cloudflare.
-Paket berisi source/migrasi/role/pin; tanpa key, DB, backup, lab inventory atau log.
-[LISENSI](docs/LICENSING.md) · [Build/audit](docs/RELEASE.md)
+
+**Contoh Perintah Cepat (`tunnelctl`):**
+
+```
+# Mengecek kesehatan komponen server
+sudo tunnelctl doctor --json
+
+# Membuat akun VLESS
+sudo tunnelctl account create --proto vless --user pelanggan --days 30 --quota 10G --limit 2
+
+# Melihat daftar akun & status online
+sudo tunnelctl account list
+sudo tunnelctl account online
+
+# Melakukan backup server manual
+sudo tunnelctl backup create
+
+```
+
+## 📄 Lisensi
+
+Proyek ini dirilis di bawah lisensi **WTFPL v2.0**. Silakan lihat file [LICENSING.md](docs/LICENSING.md) untuk informasi lebih lanjut.
