@@ -1,9 +1,4 @@
 ---
-- name: Install distro HAProxy without automatic startup
-  ansible.builtin.apt:
-    name: haproxy
-    state: present
-    policy_rc_d: 101
 - name: Read HAProxy version
   ansible.builtin.command:
     argv:

@@ -1,9 +1,4 @@
 ---
-- name: Install HTTP01 challenge servers without public distro autostart
-  ansible.builtin.apt:
-    name: [nginx, haproxy]
-    state: present
-    policy_rc_d: 101
 - name: Create HTTP01 webroot
   ansible.builtin.file:
     path: '{{ certs_acme_root }}'

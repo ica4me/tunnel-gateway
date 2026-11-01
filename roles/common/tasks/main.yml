@@ -1,11 +1,28 @@
 ---
-- name: Install base packages without automatic service startup
-  ansible.builtin.apt:
-    name: '{{ common_packages }}'
-    state: present
-    update_cache: true
-    cache_valid_time: 3600
-    policy_rc_d: 101
+- name: Inspect installed base packages
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - -W
+      - '-f=${Status}'
+      - "{{ item }}"
+  loop: "{{ common_packages }}"
+  register: common_package_check
+  changed_when: false
+  failed_when: false
+
+- name: Require previously installed base packages
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout == 'install ok installed'
+    fail_msg: >-
+      Paket {{ item.item }} belum terpasang.
+      Jalankan prepare-packages.yml terlebih dahulu.
+    quiet: true
+  loop: "{{ common_package_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
 - name: Create managed directories
   ansible.builtin.file:
     path: '{{ item }}'

@@ -1,9 +1,4 @@
 ---
-- name: Install Dropbear without public autostart
-  ansible.builtin.apt:
-    name: dropbear
-    state: present
-    policy_rc_d: 101
 - name: Disable distro Dropbear listener
   ansible.builtin.systemd:
     name: dropbear

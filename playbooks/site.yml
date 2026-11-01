@@ -31,6 +31,42 @@
         fail_msg: Supply tunnel_domain and cert_mode explicitly; no production fallback certificate.
       tags:
         - always
+
+    - name: Load gateway package requirements
+      ansible.builtin.include_vars:
+        file: vars/gateway-packages.yml
+      tags:
+        - always
+
+    - name: Inspect required gateway packages
+      ansible.builtin.command:
+        argv:
+          - dpkg-query
+          - -W
+          - '-f=${Status}'
+          - "{{ item }}"
+      loop: "{{ gateway_packages }}"
+      register: gateway_package_check
+      changed_when: false
+      failed_when: false
+      tags:
+        - always
+
+    - name: Require package preparation before service configuration
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - item.stdout == 'install ok installed'
+        fail_msg: >-
+          Paket {{ item.item }} belum terpasang.
+          Jalankan prepare-packages.yml terlebih dahulu.
+        quiet: true
+      loop: "{{ gateway_package_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags:
+        - always
+
     - name: Run foundation preflight checks
       ansible.builtin.include_role:
         name: preflight

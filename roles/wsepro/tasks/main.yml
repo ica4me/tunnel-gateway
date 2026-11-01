@@ -1,9 +1,4 @@
 ---
-- name: Install patch utility
-  ansible.builtin.apt:
-    name: patch
-    state: present
-    policy_rc_d: 101
 - name: Create managed directories
   ansible.builtin.file:
     path: '{{ item }}'

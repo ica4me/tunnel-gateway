@@ -10,13 +10,32 @@
           - (ansible_port | default(22) | int) in ([ssh_admin_port | default(22) | int] + (ssh_admin_extra_ports | default([])))
           - not (openssh_admin_change_access | default(false) | bool)
         fail_msg: Preserve existing SSH access; access migration is not supported by this bootstrap.
-    - name: Install guard and age prerequisites without starting services
-      ansible.builtin.apt:
-        name: [nftables, age]
-        state: present
-        update_cache: true
-        cache_valid_time: 3600
-        policy_rc_d: 101
+    - name: Verify firewall and backup prerequisites are installed
+      ansible.builtin.command:
+        argv:
+          - dpkg-query
+          - -W
+          - '-f=${Status}'
+          - "{{ item }}"
+      loop:
+        - nftables
+        - age
+      register: prepare_package_check
+      changed_when: false
+      failed_when: false
+
+    - name: Require prepared firewall and backup packages
+      ansible.builtin.assert:
+        that:
+          - item.rc == 0
+          - item.stdout == 'install ok installed'
+        fail_msg: >-
+          Paket {{ item.item }} belum terpasang.
+          Jalankan prepare-packages.yml terlebih dahulu.
+        quiet: true
+      loop: "{{ prepare_package_check.results }}"
+      loop_control:
+        label: "{{ item.item }}"
     - name: Create guard locations
       ansible.builtin.file:
         path: '{{ item.path }}'
@@ -47,7 +66,7 @@
           cp /etc/tunnel/nftables.conf /var/lib/tunnel/firewall-guard/previous.conf
         fi
         systemctl reset-failed tunnel-firewall-rollback.service 2>/dev/null || true
-        systemd-run --unit=tunnel-firewall-rollback --property=Type=oneshot --on-active=45m /etc/tunnel/firewall-rollback.sh
+        systemd-run --unit=tunnel-firewall-rollback --property=Type=oneshot --on-active=20m /etc/tunnel/firewall-rollback.sh
       when: prepare_guard.rc != 0
     - name: Verify timer is actually running
       ansible.builtin.command: systemctl is-active tunnel-firewall-rollback.timer

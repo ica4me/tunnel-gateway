@@ -1,9 +1,4 @@
 ---
-- name: Install Nginx without starting distro public default
-  ansible.builtin.apt:
-    name: nginx
-    state: present
-    policy_rc_d: 101
 - name: Create managed directories
   ansible.builtin.file:
     path: '{{ item }}'
@@ -36,6 +31,26 @@
     dest: '{{ nginx_camouflage_root }}/'
     mode: '0644'
   when: nginx_camouflage_site_src | length > 0
+
+- name: Read installed Nginx version
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/nginx
+      - -v
+  register: nginx_version_output
+  changed_when: false
+
+- name: Determine installed Nginx version
+  ansible.builtin.set_fact:
+    nginx_detected_version: >-
+      {{
+        (
+          nginx_version_output.stderr
+          | regex_findall('nginx/([0-9]+\.[0-9]+\.[0-9]+)')
+          | first
+        )
+      }}
+
 - name: Configure nginx.conf.j2
   ansible.builtin.template:
     src: nginx.conf.j2

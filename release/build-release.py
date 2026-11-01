@@ -10,7 +10,19 @@ import zipfile
 
 ROLES = ('common', 'firewall', 'certs', 'openssh_admin', 'dropbear', 'badvpn',
          'wsepro', 'xray', 'nginx', 'haproxy', 'fail2ban', 'backup', 'tunnelctl', 'preflight')
-PLAYBOOKS = ('prepare-server.yml', 'commit-server.yml', 'site.yml', 'verify.yml', 'backup.yml', 'restore.yml', 'update.yml', 'uninstall.yml')
+#PLAYBOOKS = ('prepare-server.yml', 'commit-server.yml', 'site.yml', 'verify.yml', 'backup.yml', 'restore.yml', 'update.yml', 'uninstall.yml')
+PLAYBOOKS = (
+    'prepare-packages.yml',
+    'prepare-speedtest.yml',
+    'prepare-server.yml',
+    'commit-server.yml',
+    'site.yml',
+    'verify.yml',
+    'backup.yml',
+    'restore.yml',
+    'update.yml',
+    'uninstall.yml',
+)
 TOP_FILES = ('README.md', 'requirements.yml', 'docs/LICENSING.md', 'docs/RELEASE.md',
              'release/build-release.py', 'release/bootstrap.sh', 'release/requirements.txt',
              'release/ansible.cfg')
@@ -35,6 +47,9 @@ def collect(root):
             rel = path.relative_to(root)
             if '__pycache__' not in rel.parts and path.suffix in ('.yml', '.j2', '.patch'):
                 paths.add(rel.as_posix())
+    # Include package lists and all supported OS manifests.
+    for path in (root / 'playbooks' / 'vars').rglob('*.yml'):
+        paths.add(path.relative_to(root).as_posix())
     for tree, suffixes in [('files/tunnelctl/tunnelctl', ('.py', '.sql')),
                            ('inventories/new-server', ('.yml',))]:
         for path in (root / tree).rglob('*'):

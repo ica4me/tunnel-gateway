@@ -5,11 +5,19 @@
       - ansible_facts.user_id == 'root'
       - ansible_facts.architecture in ['x86_64', 'aarch64']
       - >-
-        (ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version in ['12', '13'])
-        or (ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version in ['20.04', '22.04', '24.04'])
+        (ansible_facts.distribution == 'Debian'
+        and ansible_facts.distribution_major_version in ['12', '13'])
+        or
+        (ansible_facts.distribution == 'Ubuntu'
+        and ansible_facts.distribution_version in
+        ['22.04', '24.04', '26.04'])
       - ansible_facts.python.version.major == 3
-      - ansible_facts.python.version.minor >= 8
-    fail_msg: Foundation requires root, Debian 12/13 or Ubuntu 20.04/22.04/24.04, amd64/arm64 and target Python >=3.8.
+      - ansible_facts.python.version.minor >= 9
+      - ansible_facts.python.version.minor <= 14
+    fail_msg: >-
+      Unsupported platform. Requires root,
+      Debian 12/13 or Ubuntu 22.04/24.04/26.04,
+      amd64/arm64 and Python 3.9-3.14.
 - name: Validate gateway port allocation
   ansible.builtin.set_fact:
     preflight_public_ports: '{{ [80, 443] + extra_http_ports + extra_https_ports }}'
@@ -55,14 +63,3 @@
         ([xray_api_port] + (xray_ws_ports.values() | list) + (xray_grpc_ports.values() | list)))
     fail_msg: Internal tunnel port occupied by unexpected process; no automatic takeover.
   loop: '{{ preflight_listeners.stdout_lines }}'
-- name: Check Ubuntu 20.04 HAProxy availability before mutations
-  ansible.builtin.command: apt-cache policy haproxy
-  changed_when: false
-  register: preflight_haproxy_candidate
-  when: ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version == '20.04'
-- name: Require approved HAProxy package source on Ubuntu 20.04
-  ansible.builtin.assert:
-    that:
-      - (preflight_haproxy_candidate.stdout | regex_search('Candidate:\s+(?:[0-9]+:)?([0-9]+\.[0-9]+)', '\1') | first) is version('2.4', '>=')
-    fail_msg: Ubuntu 20.04 needs an operator-approved HAProxy >=2.4 package source before deployment.
-  when: ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version == '20.04'

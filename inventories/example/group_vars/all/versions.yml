@@ -1,6 +1,6 @@
 ---
 versions:
-  ansible_core: 2.19.3
+  ansible_core: "2.21.5"
   xray:
     version: v26.10.31
     commit: a4a3dff5b20c2faae567b742c172c7b95e75c083

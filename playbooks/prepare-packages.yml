@@ -1,0 +1,169 @@
+---
+- name: Audit required gateway packages
+  hosts: all
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - vars/gateway-packages.yml
+
+  vars:
+    gateway_package_mode: "{{ package_version_mode | default('pinned') }}"
+
+  tasks:
+    - name: Validate package version mode
+      ansible.builtin.assert:
+        that:
+          - gateway_package_mode in ['pinned', 'latest-compatible']
+        fail_msg: "Mode paket harus pinned atau latest-compatible."
+        quiet: true
+
+    - name: Require supported operating system
+      ansible.builtin.assert:
+        that:
+          - >-
+            (ansible_facts.distribution == 'Debian'
+             and ansible_facts.distribution_major_version in ['12', '13'])
+            or
+            (ansible_facts.distribution == 'Ubuntu'
+             and ansible_facts.distribution_version in
+             ['22.04', '24.04', '26.04'])
+          - ansible_facts.architecture in ['x86_64', 'aarch64']
+        fail_msg: >-
+          Hanya mendukung Debian 12/13 dan Ubuntu 22.04/24.04/26.04
+          pada arsitektur amd64/arm64.
+        quiet: true
+
+    - name: Normalize OS version for package manifest
+      ansible.builtin.set_fact:
+        gateway_os_version: >-
+          {{
+            ansible_facts.distribution_major_version
+            if ansible_facts.distribution == 'Debian'
+            else ansible_facts.distribution_version
+          }}
+
+    - name: Block installation until version policy is implemented
+      ansible.builtin.assert:
+        that:
+          - not (package_install_approved | default(false) | bool)
+        fail_msg: >-
+          Instalasi ditahan sampai manifest pinned dan pemeriksaan
+          latest-compatible selesai dibuat dan diuji.
+        quiet: true
+
+    - name: Load OS-specific pinned package manifest
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/vars/package-versions/{{ ansible_facts.distribution | lower }}-{{ gateway_os_version }}.yml"
+        name: gateway_package_manifest
+      when: gateway_package_mode == 'pinned'
+
+    - name: Validate pinned manifest identity and completeness
+      ansible.builtin.assert:
+        that:
+          - gateway_package_manifest.os == (ansible_facts.distribution | lower)
+          - gateway_package_manifest.version == gateway_os_version
+          - gateway_package_manifest.packages.keys() | list | difference(gateway_packages) | length == 0
+          - gateway_packages | difference(gateway_package_manifest.packages.keys() | list) | length == 0
+          - gateway_package_manifest.packages.values() | select('equalto', '(none)') | list | length == 0
+        fail_msg: "Manifest pinned tidak cocok dengan OS atau daftar paket."
+        quiet: true
+      when: gateway_package_mode == 'pinned'
+
+    - name: Check APT package candidates
+      ansible.builtin.command:
+        argv:
+          - apt-cache
+          - policy
+          - "{{ item }}"
+      loop: "{{ gateway_packages }}"
+      register: package_audit
+      changed_when: false
+
+    - name: Require available package candidates
+      ansible.builtin.assert:
+        that:
+          - "'Candidate: (none)' not in item.stdout"
+          - "'Candidate:' in item.stdout"
+        fail_msg: "Paket {{ item.item }} tidak tersedia."
+        quiet: true
+      loop: "{{ package_audit.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Read HAProxy candidate version
+      ansible.builtin.set_fact:
+        gateway_haproxy_candidate: >-
+          {{
+            (
+              package_audit.results
+              | selectattr('item', 'equalto', 'haproxy')
+              | map(attribute='stdout')
+              | first
+              | regex_findall('(?m)^\s*Candidate:\s*(?:[0-9]+:)?([0-9]+\.[0-9]+)')
+              | first
+            )
+          }}
+      when: gateway_package_mode == 'latest-compatible'
+
+    - name: Require compatible HAProxy candidate
+      ansible.builtin.assert:
+        that:
+          - gateway_haproxy_candidate is version('2.4', '>=')
+        fail_msg: "HAProxy minimal versi 2.4 diperlukan."
+        quiet: true
+      when: gateway_package_mode == 'latest-compatible'
+
+    - name: Verify pinned versions match APT candidates
+      ansible.builtin.assert:
+        that:
+          - >-
+            (item.stdout | regex_findall('(?m)^\s*Candidate:\s*(\S+)\s*$')
+            | first | default(''))
+            == gateway_package_manifest.packages[item.item]
+        fail_msg: >-
+          Versi {{ item.item }} tidak cocok dengan manifest pinned.
+        quiet: true
+      loop: "{{ package_audit.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: gateway_package_mode == 'pinned'
+
+    - name: Build pinned package installation plan
+      ansible.builtin.set_fact:
+        gateway_install_packages: >-
+          {{
+            (gateway_install_packages | default([]))
+            + [item ~ '=' ~ gateway_package_manifest.packages[item]]
+          }}
+      loop: "{{ gateway_packages }}"
+      when: gateway_package_mode == 'pinned'
+
+    - name: Build latest-compatible package installation plan
+      ansible.builtin.set_fact:
+        gateway_install_packages: "{{ gateway_packages }}"
+      when: gateway_package_mode == 'latest-compatible'
+
+    - name: Validate package installation plan
+      ansible.builtin.assert:
+        that:
+          - gateway_install_packages | length == gateway_packages | length
+        fail_msg: "Daftar instalasi paket tidak lengkap."
+        quiet: true
+
+    - name: Install approved gateway packages
+      ansible.builtin.apt:
+        name: "{{ gateway_install_packages }}"
+        state: "{{ 'latest' if gateway_package_mode == 'latest-compatible' else 'present' }}"
+        update_cache: true
+        cache_valid_time: 3600
+        policy_rc_d: 101
+        fail_on_autoremove: true
+        allow_downgrade: false
+      when: package_install_approved | default(false) | bool
+
+    - name: Show package audit summary
+      ansible.builtin.debug:
+        msg: >-
+          Pemeriksaan {{ gateway_packages | length }}
+          paket selesai.

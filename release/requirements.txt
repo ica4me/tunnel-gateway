@@ -1,2 +1,3 @@
-# Runtime controller pin verified with Python 3.10.12.
-ansible-core==2.17.14
+# Ansible controller: Python 3.12-3.14
+# Supported targets: Debian 12/13, Ubuntu 22.04/24.04/26.04
+ansible-core==2.21.5

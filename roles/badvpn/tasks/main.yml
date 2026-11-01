@@ -1,14 +1,4 @@
 ---
-- name: Install UDPGW build prerequisites
-  ansible.builtin.apt:
-    name:
-      - cmake
-      - make
-      - gcc
-      - g++
-      - pkg-config
-    state: present
-    policy_rc_d: 101
 - name: Create managed directories
   ansible.builtin.file:
     path: '{{ item }}'
@@ -40,6 +30,7 @@
       - '{{ badvpn_build_dir }}/build'
       - -DBUILD_NOTHING_BY_DEFAULT=1
       - -DBUILD_UDPGW=1
+      - -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     creates: '{{ badvpn_build_dir }}/build/Makefile'
 - name: Build UDPGW only once per source pin
   ansible.builtin.command:
