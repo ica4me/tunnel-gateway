@@ -1,0 +1,106 @@
+---
+- name: Create ACME source and protected state directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    mode: '0700'
+  loop:
+    - '{{ certs_acme_source_dir }}'
+    - '{{ certs_acme_home }}'
+    - '{{ certs_acme_config_home }}'
+- name: Fetch checksum-verified pinned acme.sh release
+  ansible.builtin.get_url:
+    url: '{{ versions.acmesh.source_tarball_url }}'
+    checksum: 'sha256:{{ versions.acmesh.source_tarball_sha256 }}'
+    dest: '{{ certs_acme_source_dir }}/source.tar.gz'
+    mode: '0600'
+- name: Extract pinned ACME source
+  ansible.builtin.unarchive:
+    src: '{{ certs_acme_source_dir }}/source.tar.gz'
+    dest: '{{ certs_acme_source_dir }}'
+    remote_src: true
+    extra_opts: [--strip-components=1]
+    creates: '{{ certs_acme_source_dir }}/acme.sh'
+- name: Install ACME deploy hook
+  ansible.builtin.template:
+    src: cert-deploy.j2
+    dest: /usr/local/sbin/tunnel-cert-deploy
+    mode: '0700'
+- name: Inspect ACME issuance state independently of existing PEM
+  ansible.builtin.stat:
+    path: '{{ certs_acme_config_home }}/{{ certs_domain }}_ecc/{{ certs_domain }}.cer'
+  register: certs_issued
+  no_log: true
+- name: Bootstrap HTTP01 challenge path including selfsigned migration
+  ansible.builtin.include_tasks: http-bootstrap.yml
+  when: certs_mode == 'http01' and not certs_issued.stat.exists
+- name: Issue initial certificate using selected challenge
+  ansible.builtin.command:
+    argv: >-
+      {{ [certs_acme_source_dir + '/acme.sh', '--issue', '--home', certs_acme_home,
+          '--config-home', certs_acme_config_home, '--server', certs_acme_ca,
+          '--accountemail', admin_email, '-d', certs_domain, '--keylength', 'ec-256']
+         + (['--dns', 'dns_cf'] if certs_mode == 'dns_cloudflare' else ['--webroot', certs_acme_root]) }}
+    creates: '{{ certs_acme_config_home }}/{{ certs_domain }}_ecc/{{ certs_domain }}.cer'
+  environment:
+    CF_Token: '{{ acme_cloudflare_token | default("") }}'
+  no_log: true
+- name: Inspect issued chain and exported certificate state
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    checksum_algorithm: sha256
+  loop:
+    - '{{ certs_acme_config_home }}/{{ certs_domain }}_ecc/fullchain.cer'
+    - '{{ certs_dir }}/{{ certs_domain }}.crt'
+    - '{{ certs_dir }}/{{ certs_domain }}.key'
+    - '{{ certs_dir }}/{{ certs_domain }}.pem'
+    - '{{ certs_acme_config_home }}/{{ certs_domain }}_ecc/tunnel-export.registered'
+  register: certs_export_state
+  no_log: true
+- name: Export ACME private key and full chain to stable paths
+  ansible.builtin.command:
+    argv:
+      - '{{ certs_acme_source_dir }}/acme.sh'
+      - --install-cert
+      - --home
+      - '{{ certs_acme_home }}'
+      - --config-home
+      - '{{ certs_acme_config_home }}'
+      - -d
+      - '{{ certs_domain }}'
+      - --ecc
+      - --key-file
+      - '{{ certs_dir }}/{{ certs_domain }}.key'
+      - --fullchain-file
+      - '{{ certs_dir }}/{{ certs_domain }}.crt'
+      - --reloadcmd
+      - /usr/local/sbin/tunnel-cert-deploy
+  when: >-
+    not certs_export_state.results[4].stat.exists
+    or not certs_export_state.results[2].stat.exists
+    or not certs_export_state.results[3].stat.exists
+    or certs_export_state.results[0].stat.checksum | default('issued')
+       != certs_export_state.results[1].stat.checksum | default('missing')
+  changed_when: true
+  no_log: true
+- name: Record successful ACME export registration
+  ansible.builtin.copy:
+    content: "Managed by Ansible; ACME export hook registered.\n"
+    dest: '{{ certs_acme_config_home }}/{{ certs_domain }}_ecc/tunnel-export.registered'
+    mode: '0600'
+- name: Install independent ACME renewal service
+  ansible.builtin.template:
+    src: cert-renew.service.j2
+    dest: /etc/systemd/system/tunnel-acme-renew.service
+    mode: '0644'
+- name: Install independent ACME renewal timer
+  ansible.builtin.template:
+    src: cert-renew.timer.j2
+    dest: /etc/systemd/system/tunnel-acme-renew.timer
+    mode: '0644'
+- name: Enable ACME renewal without requiring unavailable account CLI
+  ansible.builtin.systemd:
+    name: tunnel-acme-renew.timer
+    state: started
+    enabled: true
+    daemon_reload: true

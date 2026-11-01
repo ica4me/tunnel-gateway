@@ -1,0 +1,22 @@
+#!/bin/sh
+# Managed by Ansible. Atomic replacement and rollback before reload.
+set -eu
+umask 077
+pem='{{ certs_dir }}/{{ certs_domain }}.pem'
+crt='{{ certs_dir }}/{{ certs_domain }}.crt'
+key='{{ certs_dir }}/{{ certs_domain }}.key'
+openssl x509 -in "$crt" -noout -checkend 0
+certpub=$(openssl x509 -in "$crt" -pubkey -noout)
+keypub=$(openssl pkey -in "$key" -pubout)
+[ "$certpub" = "$keypub" ]
+cat "$crt" "$key" > "$pem.new"
+[ ! -e "$pem" ] || cp -p "$pem" "$pem.rollback"
+mv "$pem.new" "$pem"
+if [ -f /etc/haproxy/haproxy.cfg ]; then
+ if ! /usr/sbin/haproxy -c -f /etc/haproxy/haproxy.cfg; then
+  [ ! -f "$pem.rollback" ] || mv "$pem.rollback" "$pem"
+  exit 1
+ fi
+ systemctl is-active --quiet haproxy && systemctl reload haproxy
+fi
+rm -f "$pem.rollback"

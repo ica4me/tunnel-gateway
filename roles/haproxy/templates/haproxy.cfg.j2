@@ -1,0 +1,73 @@
+# Managed by Ansible
+global
+    log stdout format raw local0
+    lua-load /etc/haproxy/classifier.lua
+    user haproxy
+    group haproxy
+    maxconn {{ haproxy_maxconn }}
+
+defaults
+    log global
+    mode tcp
+    option tcplog
+    timeout connect 10s
+    timeout client 1h
+    timeout server 1h
+    timeout tunnel 1h
+
+frontend fe_http
+    bind *:80
+{% for p in extra_http_ports | default([]) %}
+    bind *:{{ p }}
+{% endfor %}
+    tcp-request inspect-delay {{ haproxy_inspect_delay }}
+    tcp-request content accept if WAIT_END
+    use_backend be_dropbear if { lua.tunnel_route -m str ssh }
+    use_backend be_web if { lua.tunnel_route -m str acme }
+    use_backend be_vmess if { lua.tunnel_route -m str vmess }
+    use_backend be_vless if { lua.tunnel_route -m str vless }
+    use_backend be_trojan if { lua.tunnel_route -m str trojan }
+    use_backend be_ss if { lua.tunnel_route -m str ss }
+{% if camouflage_enabled | bool %}
+    use_backend be_web if { lua.tunnel_route -m str web }
+{% endif %}
+    default_backend be_wsepro
+
+frontend fe_https
+    bind *:443 ssl crt /etc/haproxy/certs/{{ tunnel_domain }}.pem alpn h2,http/1.1
+{% for p in extra_https_ports | default([]) %}
+    bind *:{{ p }} ssl crt /etc/haproxy/certs/{{ tunnel_domain }}.pem alpn h2,http/1.1
+{% endfor %}
+    tcp-request inspect-delay {{ haproxy_inspect_delay }}
+    tcp-request content accept if WAIT_END
+    use_backend be_dropbear if { lua.tunnel_route -m str ssh }
+    use_backend be_grpc if { ssl_fc_alpn -i h2 }
+    use_backend be_vmess if { lua.tunnel_route -m str vmess }
+    use_backend be_vless if { lua.tunnel_route -m str vless }
+    use_backend be_trojan if { lua.tunnel_route -m str trojan }
+    use_backend be_ss if { lua.tunnel_route -m str ss }
+{% if camouflage_enabled | bool %}
+    use_backend be_web if { lua.tunnel_route -m str web }
+{% endif %}
+    default_backend be_wsepro
+
+backend be_dropbear
+    server local 127.0.0.1:{{ (dropbear_ports | first) | default(143) }}
+
+backend be_wsepro
+    server local 127.0.0.1:{{ wsepro_port }}
+
+backend be_web
+    server local 127.0.0.1:{{ nginx_web_port }}
+
+backend be_grpc
+    server local 127.0.0.1:{{ nginx_h2c_port }} send-proxy-v2
+
+backend be_vmess
+    server local 127.0.0.1:{{ xray_ws_ports.vmess }} send-proxy-v2
+backend be_vless
+    server local 127.0.0.1:{{ xray_ws_ports.vless }} send-proxy-v2
+backend be_trojan
+    server local 127.0.0.1:{{ xray_ws_ports.trojan }} send-proxy-v2
+backend be_ss
+    server local 127.0.0.1:{{ xray_ws_ports.ss }} send-proxy-v2

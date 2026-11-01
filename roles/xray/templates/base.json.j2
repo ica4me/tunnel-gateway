@@ -1,0 +1,232 @@
+{
+  "_comment": "Managed by Ansible; clients generated from account DB only.",
+  "log": {
+    "access": "/var/log/xray/access.log",
+    "error": "/var/log/xray/error.log",
+    "loglevel": "warning"
+  },
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "StatsService",
+      "LoggerService"
+    ]
+  },
+  "stats": {},
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserUplink": true,
+        "statsUserDownlink": true,
+        "statsUserOnline": true
+      }
+    }
+  },
+  "inbounds": [
+    {
+      "tag": "api-in",
+      "listen": "127.0.0.1",
+      "port": {{ xray_api_port | int }},
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "127.0.0.1"
+      }
+    },
+    {
+      "tag": "vmess-ws",
+      "listen": "127.0.0.1",
+      "port": {{ xray_ws_ports.vmess | int }},
+      "protocol": "vmess",
+      "settings": {
+        "clients": []
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "sockopt": {
+          "acceptProxyProtocol": true
+        },
+        "wsSettings": {
+          "path": "{{ xray_ws_paths.vmess }}"
+        }
+      }
+    },
+    {
+      "tag": "vless-ws",
+      "listen": "127.0.0.1",
+      "port": {{ xray_ws_ports.vless | int }},
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "sockopt": {
+          "acceptProxyProtocol": true
+        },
+        "wsSettings": {
+          "path": "{{ xray_ws_paths.vless }}"
+        }
+      }
+    },
+    {
+      "tag": "trojan-ws",
+      "listen": "127.0.0.1",
+      "port": {{ xray_ws_ports.trojan | int }},
+      "protocol": "trojan",
+      "settings": {
+        "clients": []
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "sockopt": {
+          "acceptProxyProtocol": true
+        },
+        "wsSettings": {
+          "path": "{{ xray_ws_paths.trojan }}"
+        }
+      }
+    },
+    {
+      "tag": "ss-ws",
+      "listen": "127.0.0.1",
+      "port": {{ xray_ws_ports.ss | int }},
+      "protocol": "shadowsocks",
+      "settings": {
+        "clients": [],
+        "method": "{{ xray_ss_method }}"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "none",
+        "sockopt": {
+          "acceptProxyProtocol": true
+        },
+        "wsSettings": {
+          "path": "{{ xray_ws_paths.ss }}"
+        }
+      }
+    },
+    {
+      "tag": "vmess-grpc",
+      "listen": "127.0.0.1",
+      "port": {{ xray_grpc_ports.vmess | int }},
+      "protocol": "vmess",
+      "settings": {
+        "clients": []
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "sockopt": {
+          "trustedXForwardedFor": [
+            "x-stage0-trusted"
+          ]
+        },
+        "grpcSettings": {
+          "serviceName": "{{ xray_grpc_names.vmess }}"
+        }
+      }
+    },
+    {
+      "tag": "vless-grpc",
+      "listen": "127.0.0.1",
+      "port": {{ xray_grpc_ports.vless | int }},
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "sockopt": {
+          "trustedXForwardedFor": [
+            "x-stage0-trusted"
+          ]
+        },
+        "grpcSettings": {
+          "serviceName": "{{ xray_grpc_names.vless }}"
+        }
+      }
+    },
+    {
+      "tag": "trojan-grpc",
+      "listen": "127.0.0.1",
+      "port": {{ xray_grpc_ports.trojan | int }},
+      "protocol": "trojan",
+      "settings": {
+        "clients": []
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "none",
+        "sockopt": {
+          "trustedXForwardedFor": [
+            "x-stage0-trusted"
+          ]
+        },
+        "grpcSettings": {
+          "serviceName": "{{ xray_grpc_names.trojan }}"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {
+        "finalRules": [
+          {
+            "action": "allow",
+            "network": "tcp",
+            "ip": [
+              "127.0.0.1"
+            ],
+            "port": "{{ udpgw_ports | join(',') }}"
+          }
+        ]
+      }
+    },
+    {
+      "tag": "blocked",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "api-in"
+        ],
+        "outboundTag": "api"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "127.0.0.1"
+        ],
+        "port": "{{ udpgw_ports | join(',') }}",
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "blocked"
+      }{% if xray_block_bittorrent | default(true) | bool %},
+      {
+        "type": "field",
+        "protocol": ["bittorrent"],
+        "outboundTag": "blocked"
+      }{% endif %}
+    ]
+  }
+}

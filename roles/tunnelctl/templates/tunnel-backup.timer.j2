@@ -1,0 +1,8 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel backup schedule
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=yes
+[Install]
+WantedBy=timers.target

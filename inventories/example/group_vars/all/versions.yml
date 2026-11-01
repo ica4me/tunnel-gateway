@@ -1,0 +1,29 @@
+---
+versions:
+  ansible_core: 2.19.3
+  xray:
+    version: v26.10.31
+    commit: a4a3dff5b20c2faae567b742c172c7b95e75c083
+    linux_amd64_url: https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-64.zip
+    linux_amd64_sha256: e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214
+    linux_arm64_url: https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-arm64-v8a.zip
+    linux_arm64_sha256: 1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d
+  wsepro:
+    commit: f04d2f1a5c32273af96c4dfb0baa9ef5754757f9
+    source_sha256: 351232825d49daca4f79e00ce69b85d6ea8241260fa500463a2d42b8c7c01d8c
+    patch_sha256: fbc86e2919fb490a557ea0f0e4185c53e22f75031ca563c4f8d5d717bebeb8d1
+  badvpn:
+    version: 1.999.130
+    commit: 752c6b492bc6866e8af8313a6e348d5e0370fe1f
+    source_tarball_url: https://codeload.github.com/ambrop72/badvpn/tar.gz/752c6b492bc6866e8af8313a6e348d5e0370fe1f
+    source_tarball_sha256: c57d3ca83400dafffe95cd12ebe2238ea3950a4d24e2cf905179db6746548ac1
+  acmesh:
+    version: 3.1.2
+    source_tarball_url: https://codeload.github.com/acmesh-official/acme.sh/tar.gz/refs/tags/3.1.2
+    source_tarball_sha256: a51511ad0e2912be45125cf189401e4ae776ca1a29d5768f020a1e35a9560186
+  golang:
+    version: 1.27.3
+    linux_amd64_url: https://go.dev/dl/go1.27.3.linux-amd64.tar.gz
+    linux_amd64_sha256: 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+    linux_arm64_url: https://go.dev/dl/go1.27.3.linux-arm64.tar.gz
+    linux_arm64_sha256: a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49

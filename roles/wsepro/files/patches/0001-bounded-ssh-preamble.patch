@@ -1,0 +1,168 @@
+--- a/main-v2.go
++++ b/main-v2.go
+@@ -200,7 +200,7 @@
+ }
+ 
+ func (p *ProxyServer) listenAddr() string {
+-	return fmt.Sprintf("0.0.0.0:%d", p.cfg.ListenPort)
++	return fmt.Sprintf("127.0.0.1:%d", p.cfg.ListenPort)
+ }
+ 
+ func (p *ProxyServer) targetAddr() string {
+@@ -228,18 +228,22 @@
+ 
+ 	br := bufio.NewReader(client)
+ 
+-	// Peek the first bytes to decide how to treat the connection,
+-	// without consuming them. Injector-style clients send an HTTP
+-	// upgrade request first; other modes (direct SSH, or clients that
+-	// expect the server to speak first) send raw bytes. A short
+-	// deadline keeps a silent client from hanging the handshake — if
+-	// nothing arrives we fall through to a plain relay, which also
+-	// serves "server speaks first" modes correctly.
+-	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
+-	head, _ := br.Peek(8)
+-	_ = client.SetReadDeadline(time.Time{}) // clear deadline for the relay phase
+-
+-	if looksLikeHTTP(head) {
++	// Incremental sniffing avoids waiting for eight bytes from raw clients.
++	// A silent client gets the server banner after at most 500ms.
++	_ = client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
++	var head []byte
++	for n := 1; n <= 8; n++ {
++		b, err := br.Peek(n)
++		head = b
++		if err != nil || !httpPrefix(b) || looksLikeHTTP(b) {
++			break
++		}
++	}
++	_ = client.SetReadDeadline(time.Time{})
++	httpMode := looksLikeHTTP(head)
++
++	if httpMode {
++		_ = client.SetReadDeadline(time.Now().Add(10 * time.Second))
+ 		reqLine, headers, err := readHTTPHead(br)
+ 		if err != nil {
+ 			if p.verbose >= 1 {
+@@ -289,6 +293,16 @@
+ 	wg.Add(2)
+ 	go func() {
+ 		defer wg.Done()
++		if httpMode {
++			// Parse only the client preamble. Stop before SSH identification;
++			// the same buffered reader then relays every SSH byte unchanged.
++			if err := discardPreamble(br); err != nil {
++				target.Close()
++				client.Close()
++				return
++			}
++			_ = client.SetReadDeadline(time.Time{})
++		}
+ 		pipe(target, br, p.cfg.BufLen)
+ 		halfClose(target)
+ 	}()
+@@ -306,29 +320,82 @@
+ 
+ // readHTTPHead reads the request line and headers up to the blank line.
+ // Header names are returned lower-cased.
+-func readHTTPHead(br *bufio.Reader) (reqLine string, headers map[string]string, err error) {
+-	headers = make(map[string]string)
+-	first := true
++const maxPreambleBytes = 65536
++
++// readPreambleLine never buffers an unbounded or binary line.
++func readPreambleLine(br *bufio.Reader, budget *int) (string, error) {
++	var line []byte
++	for *budget > 0 {
++		b, err := br.ReadByte()
++		if err != nil { return "", err }
++		*budget--
++		line = append(line, b)
++		if b == '\n' {
++			if len(line) < 2 || line[len(line)-2] != '\r' {
++				return "", fmt.Errorf("preamble requires CRLF")
++			}
++			return string(line[:len(line)-2]), nil
++		}
++		if (b < 32 && b != '\r' && b != '\t') || b > 126 {
++			return "", fmt.Errorf("non-text preamble")
++		}
++	}
++	return "", fmt.Errorf("preamble exceeds byte limit")
++}
++
++func readHTTPHeadBudget(br *bufio.Reader, budget *int) (string, map[string]string, error) {
++	headers := make(map[string]string)
++	line, err := readPreambleLine(br, budget)
++	if err != nil { return "", headers, err }
++	fields := strings.Fields(line)
++	if len(fields) != 3 || !looksLikeHTTP([]byte(fields[0]+" ")) ||
++		(fields[2] != "HTTP/1.1" && fields[2] != "HTTP/1.0") {
++		return line, headers, fmt.Errorf("invalid HTTP request line")
++	}
+ 	for {
+-		line, e := br.ReadString('\n')
+-		if e != nil {
+-			return reqLine, headers, e
+-		}
+-		line = strings.TrimRight(line, "\r\n")
+-		if first {
+-			reqLine = line
+-			first = false
+-			continue
+-		}
+-		if line == "" {
+-			return reqLine, headers, nil
+-		}
+-		if i := strings.Index(line, ":"); i >= 0 {
+-			name := strings.ToLower(strings.TrimSpace(line[:i]))
+-			val := strings.TrimSpace(line[i+1:])
+-			headers[name] = val
+-		}
+-	}
++		h, err := readPreambleLine(br, budget)
++		if err != nil { return line, headers, err }
++		if h == "" { break }
++		i := strings.Index(h, ":")
++		if i <= 0 { return line, headers, fmt.Errorf("invalid HTTP header") }
++		name := strings.ToLower(strings.TrimSpace(h[:i]))
++		val := strings.TrimSpace(h[i+1:])
++		if name == "transfer-encoding" || (name == "content-length" && val != "0") {
++			return line, headers, fmt.Errorf("HTTP bodies not supported in SSH preamble")
++		}
++		headers[name] = val
++	}
++	return line, headers, nil
++}
++
++func readHTTPHead(br *bufio.Reader) (string, map[string]string, error) {
++	budget := maxPreambleBytes
++	return readHTTPHeadBudget(br, &budget)
++}
++
++func httpPrefix(b []byte) bool {
++	for _, m := range []string{"GET ", "POST ", "PUT ", "HEAD ", "OPTIONS ", "CONNECT ", "DELETE ", "PATCH ", "TRACE "} {
++		if strings.HasPrefix(m, string(b)) { return true }
++	}
++	return false
++}
++
++func discardPreamble(br *bufio.Reader) error {
++	budget := maxPreambleBytes
++	for count := 0; count < 32; count++ {
++		head, err := br.Peek(4)
++		if err != nil { return err }
++		if string(head) == "SSH-" { return nil }
++		if string(head) == "HTTP" {
++			line, err := readPreambleLine(br, &budget)
++			if err != nil { return err }
++			if line != "HTTP/enhanced 200 Ok" { return fmt.Errorf("invalid enhanced preamble") }
++		} else {
++			_, _, err := readHTTPHeadBudget(br, &budget)
++			if err != nil { return err }
++		}
++	}
++	return fmt.Errorf("too many preamble requests")
+ }
+ 
+ // looksLikeHTTP reports whether the peeked bytes begin with a common

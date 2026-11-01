@@ -1,0 +1,68 @@
+---
+- name: Verify real gateway service state and listener boundaries
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Check gateway services are active
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - is-active
+          - '{{ item }}'
+      changed_when: false
+      loop:
+        - haproxy
+        - nginx
+        - xray
+        - ws-epro
+        - dropbear-tunnel
+        - chrony
+        - vnstat
+    - name: Read exact listener bindings
+      ansible.builtin.command: ss -H -tlnp
+      register: verify_listeners
+      changed_when: false
+    - name: Reject unexpected public TCP listeners
+      ansible.builtin.assert:
+        that:
+          - item.split()[3].startswith('127.') or item.split()[3].startswith('[::1]:') or (item.split()[3].split(':')[-1]
+            | int) in ([ssh_admin_port | int] + ssh_admin_extra_ports + [80, 443] + extra_http_ports + extra_https_ports)
+        fail_msg: 'Unexpected public listener: {{ item }}'
+      loop: '{{ verify_listeners.stdout_lines }}'
+    - name: Require all configured internal TCP ports on loopback
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: '{{ item }}'
+        timeout: 5
+      loop: "{{ dropbear_ports + udpgw_ports + [wsepro_port, xray_api_port, nginx_web_port, nginx_h2c_port]\n  \
+        \ + (xray_ws_ports.values() | list) + (xray_grpc_ports.values() | list) }}"
+    - name: Validate Xray config
+      ansible.builtin.command: /usr/local/bin/xray run -test -config /etc/tunnel/xray/config.json
+      changed_when: false
+    - name: Validate HAProxy config
+      ansible.builtin.command: haproxy -c -f /etc/haproxy/haproxy.cfg
+      changed_when: false
+    - name: Validate Nginx config
+      ansible.builtin.command: nginx -t
+      changed_when: false
+    - name: Validate admin SSH config
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false
+    - name: Read time synchronization status (not a synthetic success)
+      ansible.builtin.command: chronyc tracking
+      changed_when: false
+      register: verify_chrony
+    - name: Show real clock sync status
+      ansible.builtin.debug:
+        var: verify_chrony.stdout_lines
+  pre_tasks:
+    - name: Load safe defaults namespace
+      ansible.builtin.include_vars:
+        file: ../inventories/example/group_vars/all/main.yml
+        name: gateway_safe_defaults
+    - name: Apply missing variables without overriding inventory
+      ansible.builtin.set_fact:
+        '{{ item.key }}': '{{ item.value }}'
+      loop: '{{ gateway_safe_defaults | dict2items }}'
+      when: item.key not in vars

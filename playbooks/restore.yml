@@ -1,0 +1,39 @@
+---
+- name: Restore through verified transactional CLI
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit restore confirmation and archive
+      ansible.builtin.assert:
+        that:
+          - restore_confirm | default(false) | bool
+          - backup_file | default('') | length > 0
+        fail_msg: Supply restore_confirm=true and backup_file. CLI must already be deployed.
+    - name: Transfer protected restore input
+      ansible.builtin.copy:
+        src: '{{ backup_file }}'
+        dest: /var/backups/tunnel/restore-{{ backup_file | basename }}
+        mode: '0600'
+      no_log: true
+    - name: Verify manifest and encryption before mutation
+      ansible.builtin.command: tunnelctl backup verify /var/backups/tunnel/restore-{{ backup_file | basename }}
+      changed_when: false
+      no_log: true
+    - name: Restore using approved CLI interface
+      ansible.builtin.command:
+        argv:
+          - tunnelctl
+          - backup
+          - restore
+          - /var/backups/tunnel/restore-{{ backup_file | basename }}
+          - --yes
+      changed_when: true
+      no_log: true
+  pre_tasks:
+    - name: Require verified transactional backup CLI integration
+      ansible.builtin.assert:
+        that:
+          - tunnelctl_backup_integration_approved | default(false) | bool
+        fail_msg: Blocked pending sibling CLI transactional backup wiring and encryption interface validation. Do
+          not enable against unreviewed CLI.

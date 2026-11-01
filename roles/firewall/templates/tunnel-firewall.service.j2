@@ -1,0 +1,12 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel gateway owned nftables table
+After=network-pre.target nftables.service
+Before=network.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/tunnel/nftables.conf
+ExecReload=/usr/sbin/nft -f /etc/tunnel/nftables.conf
+[Install]
+WantedBy=multi-user.target

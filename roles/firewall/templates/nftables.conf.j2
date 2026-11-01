@@ -1,0 +1,21 @@
+#!/usr/sbin/nft -f
+# Managed by Ansible. Own only the tunnel_gateway table.
+add table inet tunnel_gateway
+flush table inet tunnel_gateway
+table inet tunnel_gateway {
+  chain input {
+    type filter hook input priority 10; policy drop;
+    iifname "lo" accept
+    ct state established,related accept
+    ct state invalid drop
+{% if firewall_allow_icmp | default(true) %}
+    ip protocol icmp accept
+    meta l4proto ipv6-icmp accept
+{% endif %}
+    udp sport 67 udp dport 68 accept
+    udp sport 547 udp dport 546 accept
+    tcp dport { {{ firewall_allowed_tcp_ports | unique | sort | join(', ') }} } accept
+  }
+  chain forward { type filter hook forward priority 10; policy drop; }
+  chain output { type filter hook output priority 10; policy accept; }
+}

@@ -1,0 +1,75 @@
+---
+- name: Install UDPGW build prerequisites
+  ansible.builtin.apt:
+    name:
+      - cmake
+      - make
+      - gcc
+      - g++
+      - pkg-config
+    state: present
+    policy_rc_d: 101
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - '{{ badvpn_build_dir }}'
+- name: Download verified pinned badvpn source
+  ansible.builtin.get_url:
+    url: '{{ versions.badvpn.source_tarball_url }}'
+    dest: '{{ badvpn_build_dir }}/source.tar.gz'
+    checksum: sha256:{{ versions.badvpn.source_tarball_sha256 }}
+    mode: '0644'
+- name: Extract pinned badvpn source
+  ansible.builtin.unarchive:
+    src: '{{ badvpn_build_dir }}/source.tar.gz'
+    dest: '{{ badvpn_build_dir }}'
+    remote_src: true
+    creates: '{{ badvpn_build_dir }}/badvpn-{{ versions.badvpn.commit }}/CMakeLists.txt'
+- name: Configure only UDPGW target
+  ansible.builtin.command:
+    argv:
+      - cmake
+      - -S
+      - '{{ badvpn_build_dir }}/badvpn-{{ versions.badvpn.commit }}'
+      - -B
+      - '{{ badvpn_build_dir }}/build'
+      - -DBUILD_NOTHING_BY_DEFAULT=1
+      - -DBUILD_UDPGW=1
+    creates: '{{ badvpn_build_dir }}/build/Makefile'
+- name: Build UDPGW only once per source pin
+  ansible.builtin.command:
+    argv:
+      - cmake
+      - --build
+      - '{{ badvpn_build_dir }}/build'
+      - --target
+      - badvpn-udpgw
+      - -j2
+    creates: '{{ badvpn_build_dir }}/build/udpgw/badvpn-udpgw'
+- name: Install compiled UDPGW
+  ansible.builtin.copy:
+    src: '{{ badvpn_build_dir }}/build/udpgw/badvpn-udpgw'
+    remote_src: true
+    dest: '{{ badvpn_install_bin }}'
+    mode: '0755'
+  notify: Restart UDPGW instances
+- name: Configure badvpn-udpgw@.service.j2
+  ansible.builtin.template:
+    src: badvpn-udpgw@.service.j2
+    dest: /etc/systemd/system/badvpn-udpgw@.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart UDPGW instances
+- name: Enable configured UDPGW instances
+  ansible.builtin.systemd:
+    name: badvpn-udpgw@{{ item }}
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop: '{{ udpgw_ports }}'

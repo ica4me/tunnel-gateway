@@ -1,0 +1,82 @@
+---
+- name: Install base packages without automatic service startup
+  ansible.builtin.apt:
+    name: '{{ common_packages }}'
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    policy_rc_d: 101
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /opt/tunnel
+    - /opt/tunnel-stage1
+    - /usr/local/src
+    - /etc/tunnel
+    - /etc/systemd/journald.conf.d
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  loop:
+    - /var/lib/tunnel
+    - /var/lib/tunnel/exports
+- name: Set local display timezone
+  community.general.timezone:
+    name: '{{ timezone }}'
+- name: Enable chrony
+  ansible.builtin.systemd:
+    name: chrony
+    state: started
+    enabled: true
+    daemon_reload: true
+- name: Enable vnstat
+  ansible.builtin.systemd:
+    name: vnstat
+    state: started
+    enabled: true
+    daemon_reload: true
+- name: Configure journald.conf.j2
+  ansible.builtin.template:
+    src: journald.conf.j2
+    dest: /etc/systemd/journald.conf.d/99-tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart journald
+- name: Read available congestion controls
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -n
+      - net.ipv4.tcp_available_congestion_control
+  register: common_congestion
+  changed_when: false
+- name: Configure sysctl.conf.j2
+  ansible.builtin.template:
+    src: sysctl.conf.j2
+    dest: /etc/sysctl.d/99-tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply sysctl
+- name: Configure tmpfiles.conf.j2
+  ansible.builtin.template:
+    src: tmpfiles.conf.j2
+    dest: /etc/tmpfiles.d/tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+- name: Create volatile lock directory
+  ansible.builtin.file:
+    path: /run/tunnel
+    state: directory
+    mode: '0700'

@@ -1,0 +1,20 @@
+---
+- name: Install fail2ban package
+  when: fail2ban_enabled | default(true) | bool
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+    policy_rc_d: 101
+- name: Configure fail2ban jail.local
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: '0644'
+  when: fail2ban_enabled | default(true) | bool
+  notify: Restart Fail2ban
+- name: Ensure fail2ban service enabled
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: fail2ban_enabled | default(true) | bool

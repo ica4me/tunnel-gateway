@@ -1,0 +1,8 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel usage schedule
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+[Install]
+WantedBy=timers.target

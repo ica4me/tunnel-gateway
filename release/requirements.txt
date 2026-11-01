@@ -1,0 +1,2 @@
+# Runtime controller pin verified with Python 3.10.12.
+ansible-core==2.17.14

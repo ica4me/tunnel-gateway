@@ -1,0 +1,7 @@
+---
+tunnelctl_python_module_dir: /opt/tunnel/tunnelctl
+tunnelctl_source_dir: '{{ playbook_dir }}/../files/tunnelctl/'
+tunnelctl_wrapper: /usr/local/sbin/tunnelctl
+tunnelctl_menu_wrapper: /usr/local/sbin/menu
+tunnelctl_settings: {}
+tunnelctl_integration_approved: false

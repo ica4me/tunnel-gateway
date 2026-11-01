@@ -1,0 +1,29 @@
+---
+- name: Install HTTP01 challenge servers without public distro autostart
+  ansible.builtin.apt:
+    name: [nginx, haproxy]
+    state: present
+    policy_rc_d: 101
+- name: Create HTTP01 webroot
+  ansible.builtin.file:
+    path: '{{ certs_acme_root }}'
+    state: directory
+    mode: '0755'
+- name: Install loopback-only HTTP01 bootstrap Nginx
+  ansible.builtin.template:
+    src: http-nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    mode: '0644'
+    validate: /usr/sbin/nginx -t -c %s
+- name: Install HTTP-only HAProxy bootstrap until initial certificate exists
+  ansible.builtin.template:
+    src: http-haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    mode: '0644'
+    validate: /usr/sbin/haproxy -c -f %s
+- name: Start HTTP01 bootstrap servers
+  ansible.builtin.systemd:
+    name: '{{ item }}'
+    state: restarted
+    enabled: true
+  loop: [nginx, haproxy]

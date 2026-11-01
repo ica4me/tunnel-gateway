@@ -1,0 +1,4 @@
+---
+nginx_camouflage_root: /var/www/tunnel-site
+nginx_acme_root: /var/www/tunnel-acme
+nginx_camouflage_site_src: ''

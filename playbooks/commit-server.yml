@@ -1,0 +1,29 @@
+---
+- import_playbook: verify.yml
+- name: Commit only after new SSH connection and CLI health verification
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Drop existing SSH multiplex connection
+      ansible.builtin.meta: reset_connection
+    - name: Prove new authenticated administrative connection
+      ansible.builtin.ping:
+    - name: Verify CLI health before removing recovery timer
+      ansible.builtin.command: tunnelctl doctor --json
+      register: commit_doctor
+      changed_when: false
+      when: tunnelctl_enabled | default(false) | bool
+    - name: Require successful doctor checks
+      ansible.builtin.assert:
+        that: (commit_doctor.stdout | from_json).ok | bool
+      when: tunnelctl_enabled | default(false) | bool
+    - name: Cancel verified deployment rollback timer
+      ansible.builtin.systemd:
+        name: tunnel-firewall-rollback.timer
+        state: stopped
+    - name: Confirm rollback is no longer armed
+      ansible.builtin.command: systemctl is-active tunnel-firewall-rollback.timer
+      register: commit_guard
+      failed_when: commit_guard.rc == 0
+      changed_when: false

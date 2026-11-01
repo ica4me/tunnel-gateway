@@ -1,0 +1,19 @@
+---
+- name: Require supported root trial host
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.user_id == 'root'
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '22.04'
+      - ansible_facts.architecture == 'x86_64'
+    fail_msg: Tahap 0 hanya diuji pada VM Ubuntu 22.04 amd64 sebagai root.
+- name: Read current public listeners
+  ansible.builtin.command: ss -H -tlnp
+  register: trial_listeners
+  changed_when: false
+- name: Refuse foreign listeners on gateway ports
+  ansible.builtin.assert:
+    that:
+      - item is not regex('.*:(80|443)\s.*') or 'haproxy' in item
+    fail_msg: Port 80/443 dipakai layanan lain; tidak akan diambil alih.
+  loop: '{{ trial_listeners.stdout_lines }}'

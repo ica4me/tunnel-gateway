@@ -1,0 +1,11 @@
+# Managed by Ansible: first issuance only; final nginx role replaces this.
+user www-data;
+events { worker_connections 512; }
+http {
+ server {
+  listen 127.0.0.1:{{ nginx_web_port }};
+  root {{ certs_acme_root }};
+  location /.well-known/acme-challenge/ { try_files $uri =404; }
+  location / { return 404; }
+ }
+}

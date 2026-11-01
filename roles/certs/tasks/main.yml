@@ -1,0 +1,74 @@
+---
+- name: Create protected certificate directory
+  ansible.builtin.file:
+    path: '{{ certs_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+- name: Inspect existing certificate bundle
+  ansible.builtin.stat:
+    path: '{{ certs_dir }}/{{ certs_domain }}.pem'
+  register: certs_existing
+- name: Require real domain and email for ACME
+  ansible.builtin.assert:
+    that:
+      - certs_domain | length > 0
+      - not certs_domain.endswith('.test')
+      - not certs_domain.endswith('.example')
+      - admin_email | length > 0
+      - certs_acme_ca in ['letsencrypt', 'zerossl', 'letsencrypt_test']
+    fail_msg: ACME requires an explicitly supplied real domain/email and supported CA.
+  when: certs_mode != 'selfsigned'
+- name: Require Vault-backed scoped Cloudflare token
+  ansible.builtin.assert:
+    that:
+      - acme_cloudflare_token | default('') | length > 0
+    fail_msg: Supply vault_cloudflare_api_token with DNS edit scope; never put tokens in examples.
+  no_log: true
+  when: certs_mode == 'dns_cloudflare'
+- name: Generate lab self-signed bundle only if no existing bundle
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:2048
+      - -sha256
+      - -nodes
+      - -days
+      - '365'
+      - -subj
+      - '/CN={{ certs_domain }}'
+      - -addext
+      - 'subjectAltName=DNS:{{ certs_domain }}'
+      - -keyout
+      - '{{ certs_dir }}/{{ certs_domain }}.key'
+      - -out
+      - '{{ certs_dir }}/{{ certs_domain }}.crt'
+    creates: '{{ certs_dir }}/{{ certs_domain }}.crt'
+  when: certs_mode == 'selfsigned' and not certs_existing.stat.exists
+- name: Build self-signed bundle atomically preserving existing lab certificate
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import pathlib,os; d=pathlib.Path('{{ certs_dir }}'); n='{{ certs_domain }}';
+        p=d/(n+'.pem'); t=d/(n+'.pem.new');
+        t.write_bytes((d/(n+'.crt')).read_bytes()+(d/(n+'.key')).read_bytes());
+        t.chmod(0o600); os.replace(t,p)
+    creates: '{{ certs_dir }}/{{ certs_domain }}.pem'
+  when: certs_mode == 'selfsigned'
+  notify: Reload HAProxy
+- name: Protect certificate private keys and bundle
+  ansible.builtin.file:
+    path: '{{ certs_dir }}/{{ certs_domain }}.pem'
+    owner: root
+    group: root
+    mode: '0600'
+  when: certs_mode == 'selfsigned' or certs_existing.stat.exists
+- name: Install pinned ACME source and issue certificate
+  ansible.builtin.include_tasks: acme.yml
+  when: certs_mode != 'selfsigned'

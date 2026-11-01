@@ -1,0 +1,6 @@
+---
+- name: Reload HAProxy
+  ansible.builtin.systemd:
+    name: haproxy
+    state: reloaded
+    daemon_reload: true

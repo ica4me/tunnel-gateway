@@ -1,0 +1,24 @@
+---
+- name: Create consistent CLI backup and fetch to controller
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Create backup with manifest via CLI
+      ansible.builtin.command: tunnelctl backup create --json
+      register: backup_result
+      changed_when: true
+      no_log: true
+    - name: Fetch resulting protected archive
+      ansible.builtin.fetch:
+        src: '{{ (backup_result.stdout | from_json).file }}'
+        dest: '{{ playbook_dir }}/../backups/{{ inventory_hostname }}/'
+        flat: true
+      no_log: true
+  pre_tasks:
+    - name: Require verified transactional backup CLI integration
+      ansible.builtin.assert:
+        that:
+          - tunnelctl_backup_integration_approved | default(false) | bool
+        fail_msg: Blocked pending sibling CLI transactional backup wiring and encryption interface validation. Do
+          not enable against unreviewed CLI.

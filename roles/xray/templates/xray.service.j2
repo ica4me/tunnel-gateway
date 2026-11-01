@@ -1,0 +1,19 @@
+# Managed by Ansible
+[Unit]
+Description=Xray proxy service
+After=network.target
+[Service]
+Type=simple
+Environment=XRAY_LOCATION_ASSET={{ xray_data_dir }}
+ExecStart={{ xray_bin }} run -config {{ xray_config_path }}
+Restart=on-failure
+RestartSec=2
+LimitNOFILE=65535
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/xray
+CapabilityBoundingSet=
+[Install]
+WantedBy=multi-user.target

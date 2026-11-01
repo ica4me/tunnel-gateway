@@ -1,0 +1,5 @@
+---
+badvpn_build_dir: /opt/tunnel/build/badvpn-{{ versions.badvpn.commit }}
+badvpn_install_bin: /usr/local/bin/badvpn-udpgw
+badvpn_max_clients: 1024
+badvpn_max_connections_for_client: 8

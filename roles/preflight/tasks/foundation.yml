@@ -1,0 +1,68 @@
+---
+- name: Require supported foundation platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.user_id == 'root'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - >-
+        (ansible_facts.distribution == 'Debian' and ansible_facts.distribution_major_version in ['12', '13'])
+        or (ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version in ['20.04', '22.04', '24.04'])
+      - ansible_facts.python.version.major == 3
+      - ansible_facts.python.version.minor >= 8
+    fail_msg: Foundation requires root, Debian 12/13 or Ubuntu 20.04/22.04/24.04, amd64/arm64 and target Python >=3.8.
+- name: Validate gateway port allocation
+  ansible.builtin.set_fact:
+    preflight_public_ports: '{{ [80, 443] + extra_http_ports + extra_https_ports }}'
+    preflight_internal_ports: >-
+      {{ dropbear_ports + udpgw_ports + [wsepro_port, xray_api_port, nginx_web_port, nginx_h2c_port]
+         + (xray_ws_ports.values() | list) + (xray_grpc_ports.values() | list) }}
+- name: Reject duplicate overlapping or invalid ports
+  ansible.builtin.assert:
+    that:
+      - preflight_public_ports | unique | length == preflight_public_ports | length
+      - preflight_internal_ports | unique | length == preflight_internal_ports | length
+      - preflight_public_ports | intersect(preflight_internal_ports) | length == 0
+      - ([ssh_admin_port] + ssh_admin_extra_ports) | intersect(preflight_public_ports + preflight_internal_ports) | length == 0
+      - (preflight_public_ports + preflight_internal_ports + [ssh_admin_port] + ssh_admin_extra_ports) | map('int') | min > 0
+      - (preflight_public_ports + preflight_internal_ports + [ssh_admin_port] + ssh_admin_extra_ports) | map('int') | max <= 65535
+- name: Read current TCP listeners before mutations
+  ansible.builtin.command: ss -H -tlnp
+  register: preflight_listeners
+  changed_when: false
+- name: Inspect HAProxy configuration ownership
+  ansible.builtin.command:
+    argv: [python3, -c, "from pathlib import Path; p=Path('/etc/haproxy/haproxy.cfg'); print(p.exists() and p.read_text().startswith('# Managed by Ansible'))"]
+  register: preflight_haproxy_owned
+  changed_when: false
+- name: Refuse foreign public tunnel listener takeover
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.split()[3].split(':')[-1] | int) not in preflight_public_ports
+        or ('"haproxy"' in item and preflight_haproxy_owned.stdout == 'True')
+    fail_msg: Public gateway port occupied by foreign service or unowned HAProxy config; no automatic takeover.
+  loop: '{{ preflight_listeners.stdout_lines }}'
+- name: Refuse foreign internal tunnel listener conflicts
+  ansible.builtin.assert:
+    that:
+      - >-
+        (item.split()[3].split(':')[-1] | int) not in preflight_internal_ports
+        or ('"dropbear"' in item and (item.split()[3].split(':')[-1] | int) in dropbear_ports)
+        or ('"badvpn-udpgw"' in item and (item.split()[3].split(':')[-1] | int) in udpgw_ports)
+        or ('"ws-epro"' in item and (item.split()[3].split(':')[-1] | int) == wsepro_port)
+        or ('"nginx"' in item and (item.split()[3].split(':')[-1] | int) in [nginx_web_port, nginx_h2c_port])
+        or ('"xray"' in item and (item.split()[3].split(':')[-1] | int) in
+        ([xray_api_port] + (xray_ws_ports.values() | list) + (xray_grpc_ports.values() | list)))
+    fail_msg: Internal tunnel port occupied by unexpected process; no automatic takeover.
+  loop: '{{ preflight_listeners.stdout_lines }}'
+- name: Check Ubuntu 20.04 HAProxy availability before mutations
+  ansible.builtin.command: apt-cache policy haproxy
+  changed_when: false
+  register: preflight_haproxy_candidate
+  when: ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version == '20.04'
+- name: Require approved HAProxy package source on Ubuntu 20.04
+  ansible.builtin.assert:
+    that:
+      - (preflight_haproxy_candidate.stdout | regex_search('Candidate:\s+(?:[0-9]+:)?([0-9]+\.[0-9]+)', '\1') | first) is version('2.4', '>=')
+    fail_msg: Ubuntu 20.04 needs an operator-approved HAProxy >=2.4 package source before deployment.
+  when: ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version == '20.04'

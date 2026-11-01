@@ -1,0 +1,14 @@
+# Managed by Ansible: first issuance only; final haproxy role replaces this.
+global
+ user haproxy
+ group haproxy
+defaults
+ mode tcp
+ timeout connect 5s
+ timeout client 30s
+ timeout server 30s
+frontend challenge
+ bind *:80
+ default_backend challenge
+backend challenge
+ server web 127.0.0.1:{{ nginx_web_port }}

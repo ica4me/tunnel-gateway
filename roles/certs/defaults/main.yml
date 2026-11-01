@@ -1,0 +1,9 @@
+---
+certs_dir: /etc/haproxy/certs
+certs_domain: '{{ tunnel_domain }}'
+certs_mode: '{{ cert_mode }}'
+certs_acme_source_dir: '/opt/tunnel/acme-source-{{ versions.acmesh.version }}'
+certs_acme_home: /opt/tunnel/acme
+certs_acme_config_home: /etc/tunnel/acme
+certs_acme_ca: '{{ acme_ca | default("letsencrypt") }}'
+certs_acme_root: /var/www/tunnel-acme

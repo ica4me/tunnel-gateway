@@ -1,0 +1,74 @@
+---
+- name: Record checksums of deployed sole-owned resources
+  ansible.builtin.stat:
+    path: '{{ item }}'
+    checksum_algorithm: sha256
+  loop:
+    - /usr/local/bin/ws-epro
+    - /usr/local/bin/xray
+    - /usr/local/bin/badvpn-udpgw
+    - /usr/local/sbin/tunnelctl
+    - /usr/local/sbin/menu
+    - /usr/local/sbin/tunnel-cert-deploy
+    - /etc/haproxy/haproxy.cfg
+    - /etc/haproxy/classifier.lua
+    - /etc/nginx/nginx.conf
+    - /etc/fail2ban/jail.local
+    - /etc/systemd/system/nginx.service.d/tunnel.conf
+    - /etc/systemd/system/haproxy.service.d/tunnel.conf
+    - /etc/systemd/system/ws-epro.service
+    - /etc/systemd/system/xray.service
+    - /etc/systemd/system/dropbear-tunnel.service
+    - /etc/systemd/system/tunnel-firewall.service
+    - /etc/systemd/system/badvpn-udpgw@.service
+    - /etc/systemd/system/tunnel-acme-renew.service
+    - /etc/systemd/system/tunnel-acme-renew.timer
+    - /etc/systemd/system/tunnel-usage.service
+    - /etc/systemd/system/tunnel-usage.timer
+    - /etc/systemd/system/tunnel-limit.service
+    - /etc/systemd/system/tunnel-limit.timer
+    - /etc/systemd/system/tunnel-expiry.service
+    - /etc/systemd/system/tunnel-expiry.timer
+    - /etc/systemd/system/tunnel-backup.service
+    - /etc/systemd/system/tunnel-backup.timer
+    - /etc/systemd/journald.conf.d/99-tunnel.conf
+    - /etc/sysctl.d/99-tunnel.conf
+    - /etc/tmpfiles.d/tunnel.conf
+    - /etc/logrotate.d/tunnel-xray
+    - /etc/ssh/sshd_config.d/90-tunnel-admin.conf
+    - /etc/tunnel/nftables.conf
+    - /etc/tunnel/ws-epro.conf
+    - /usr/local/share/xray/geoip.dat
+    - /usr/local/share/xray/geosite.dat
+  register: common_owned_resources
+  no_log: true
+
+- name: Verify ownership markers on shared configuration paths
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - >-
+        import json; from pathlib import Path;
+        paths=['/etc/nginx/nginx.conf','/etc/haproxy/haproxy.cfg','/etc/fail2ban/jail.local',
+        '/usr/local/sbin/tunnelctl','/usr/local/sbin/menu'];
+        print(json.dumps([str(p) for p in map(Path,paths) if p.is_file()
+        and b'# Managed by Ansible' not in p.read_bytes()[:256]]))
+  register: common_foreign_paths
+  changed_when: false
+
+- name: Build stable ownership ledger without stat timestamps
+  ansible.builtin.set_fact:
+    common_ownership_ledger: >-
+      {{ dict(common_owned_resources.results | selectattr('stat.checksum', 'defined')
+              | rejectattr('item', 'in', common_foreign_paths.stdout | from_json) | map(attribute='item')
+              | zip(common_owned_resources.results | selectattr('stat.checksum', 'defined')
+              | rejectattr('item', 'in', common_foreign_paths.stdout | from_json) | map(attribute='stat.checksum'))) }}
+  no_log: true
+
+- name: Persist ownership ledger for conservative uninstall
+  ansible.builtin.copy:
+    content: '{{ common_ownership_ledger | to_nice_json }}'
+    dest: /var/lib/tunnel/ansible-owned-resources.json
+    mode: '0600'
+  no_log: true

@@ -1,0 +1,12 @@
+# Managed by Ansible
+/var/log/xray/*.log {
+  daily
+  rotate 7
+  size 50M
+  missingok
+  notifempty
+  compress
+  delaycompress
+  copytruncate
+  su root root
+}

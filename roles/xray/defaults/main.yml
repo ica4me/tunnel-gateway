@@ -1,0 +1,7 @@
+---
+xray_bin: /usr/local/bin/xray
+xray_config_path: /etc/tunnel/xray/config.json
+xray_base_path: /etc/tunnel/xray/base.json
+xray_data_dir: /usr/local/share/xray
+xray_build_dir: /opt/tunnel/build/xray-{{ versions.xray.version }}-{{ ansible_facts.architecture }}
+xray_artifact_arch: '{{ ''amd64'' if ansible_facts.architecture == ''x86_64'' else ''arm64'' }}'

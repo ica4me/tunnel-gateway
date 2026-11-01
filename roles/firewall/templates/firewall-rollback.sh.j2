@@ -1,0 +1,13 @@
+#!/bin/sh
+# Managed by Ansible: revert only our table, never flush foreign policy.
+set -eu
+/usr/sbin/nft delete table inet tunnel_gateway 2>/dev/null || true
+if [ -s /var/lib/tunnel/firewall-guard/previous.nft ]; then
+    /usr/sbin/nft -f /var/lib/tunnel/firewall-guard/previous.nft
+fi
+# Restore persisted policy so a reboot cannot reapply a failed deployment.
+if [ -f /var/lib/tunnel/firewall-guard/previous.conf ]; then
+    cp /var/lib/tunnel/firewall-guard/previous.conf /etc/tunnel/nftables.conf
+else
+    systemctl disable tunnel-firewall.service || true
+fi

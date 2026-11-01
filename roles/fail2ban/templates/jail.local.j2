@@ -1,0 +1,8 @@
+# Managed by Ansible
+[DEFAULT]
+ignoreip = {{ fail2ban_ignoreip | join(' ') }}
+backend = systemd
+banaction = nftables-multiport
+[sshd]
+enabled = true
+port = {{ ([ssh_admin_port] + ssh_admin_extra_ports) | join(',') }}

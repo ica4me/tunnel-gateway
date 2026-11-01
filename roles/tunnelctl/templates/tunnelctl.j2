@@ -1,0 +1,4 @@
+#!/bin/sh
+# Managed by Ansible
+export PYTHONPATH={{ tunnelctl_python_module_dir }}
+exec python3 -m tunnelctl "$@"

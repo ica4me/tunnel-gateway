@@ -1,0 +1,7 @@
+---
+- name: Restart UDPGW instances
+  ansible.builtin.systemd:
+    name: badvpn-udpgw@{{ item }}
+    state: restarted
+    daemon_reload: true
+  loop: '{{ udpgw_ports }}'

@@ -1,0 +1,57 @@
+---
+- name: Prepare bounded rollback and optional encrypted backup prerequisites
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require current SSH port to remain the admin access port
+      ansible.builtin.assert:
+        that:
+          - (ansible_port | default(22) | int) in ([ssh_admin_port | default(22) | int] + (ssh_admin_extra_ports | default([])))
+          - not (openssh_admin_change_access | default(false) | bool)
+        fail_msg: Preserve existing SSH access; access migration is not supported by this bootstrap.
+    - name: Install guard and age prerequisites without starting services
+      ansible.builtin.apt:
+        name: [nftables, age]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+        policy_rc_d: 101
+    - name: Create guard locations
+      ansible.builtin.file:
+        path: '{{ item.path }}'
+        state: directory
+        mode: '{{ item.mode }}'
+      loop:
+        - {path: /etc/tunnel, mode: '0755'}
+        - {path: /var/lib/tunnel/firewall-guard, mode: '0700'}
+    - name: Install rollback program
+      ansible.builtin.template:
+        src: ../roles/firewall/templates/firewall-rollback.sh.j2
+        dest: /etc/tunnel/firewall-rollback.sh
+        owner: root
+        group: root
+        mode: '0700'
+    - name: Check existing guard without trusting inventory flags
+      ansible.builtin.command: systemctl is-active tunnel-firewall-rollback.timer
+      register: prepare_guard
+      failed_when: false
+      changed_when: false
+    - name: Snapshot owned policy and arm real timer
+      ansible.builtin.shell: |
+        set -eu
+        umask 077
+        nft list table inet tunnel_gateway > /var/lib/tunnel/firewall-guard/previous.nft 2>/dev/null || :
+        rm -f /var/lib/tunnel/firewall-guard/previous.conf
+        if [ -f /etc/tunnel/nftables.conf ]; then
+          cp /etc/tunnel/nftables.conf /var/lib/tunnel/firewall-guard/previous.conf
+        fi
+        systemctl reset-failed tunnel-firewall-rollback.service 2>/dev/null || true
+        systemd-run --unit=tunnel-firewall-rollback --property=Type=oneshot --on-active=20m /etc/tunnel/firewall-rollback.sh
+      when: prepare_guard.rc != 0
+    - name: Verify timer is actually running
+      ansible.builtin.command: systemctl is-active tunnel-firewall-rollback.timer
+      changed_when: false
+    - name: Provision optional age recipient and Vault identity
+      ansible.builtin.include_role:
+        name: backup

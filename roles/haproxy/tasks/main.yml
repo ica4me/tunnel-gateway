@@ -1,0 +1,58 @@
+---
+- name: Install distro HAProxy without automatic startup
+  ansible.builtin.apt:
+    name: haproxy
+    state: present
+    policy_rc_d: 101
+- name: Read HAProxy version
+  ansible.builtin.command:
+    argv:
+      - haproxy
+      - -v
+  changed_when: false
+  register: haproxy_version_output
+- name: Require HAProxy 2.4 or newer
+  ansible.builtin.assert:
+    that:
+      - (haproxy_version_output.stdout | regex_search('[0-9]+\.[0-9]+\.[0-9]+')) is version('2.4', '>=')
+    fail_msg: HAProxy >=2.4 required. Ubuntu 20.04 requires an explicitly configured supported package repository.
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/systemd/system/haproxy.service.d
+- name: Configure classifier.lua.j2
+  ansible.builtin.template:
+    src: classifier.lua.j2
+    dest: /etc/haproxy/classifier.lua
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload HAProxy
+- name: Configure haproxy.cfg.j2
+  ansible.builtin.template:
+    src: haproxy.cfg.j2
+    dest: /etc/haproxy/haproxy.cfg
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/haproxy -c -f %s
+  notify: Reload HAProxy
+- name: Configure hardening.conf.j2
+  ansible.builtin.template:
+    src: hardening.conf.j2
+    dest: /etc/systemd/system/haproxy.service.d/tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload HAProxy
+- name: Enable haproxy
+  ansible.builtin.systemd:
+    name: haproxy
+    state: started
+    enabled: true
+    daemon_reload: true

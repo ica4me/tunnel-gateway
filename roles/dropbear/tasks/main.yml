@@ -1,0 +1,59 @@
+---
+- name: Install Dropbear without public autostart
+  ansible.builtin.apt:
+    name: dropbear
+    state: present
+    policy_rc_d: 101
+- name: Disable distro Dropbear listener
+  ansible.builtin.systemd:
+    name: dropbear
+    state: stopped
+    enabled: false
+- name: Register noninteractive tunnel shells
+  ansible.builtin.lineinfile:
+    path: /etc/shells
+    line: '{{ item }}'
+  loop:
+    - /bin/false
+    - /usr/sbin/nologin
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/dropbear
+- name: Create persistent ed25519 host key
+  ansible.builtin.command:
+    argv:
+      - dropbearkey
+      - -t
+      - ed25519
+      - -f
+      - /etc/dropbear/dropbear_ed25519_host_key
+    creates: /etc/dropbear/dropbear_ed25519_host_key
+  notify: Restart Dropbear tunnel
+- name: Configure banner.txt.j2
+  ansible.builtin.template:
+    src: banner.txt.j2
+    dest: '{{ dropbear_banner_path }}'
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Dropbear tunnel
+- name: Configure dropbear-tunnel.service.j2
+  ansible.builtin.template:
+    src: dropbear-tunnel.service.j2
+    dest: /etc/systemd/system/dropbear-tunnel.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Dropbear tunnel
+- name: Enable dropbear-tunnel
+  ansible.builtin.systemd:
+    name: dropbear-tunnel
+    state: started
+    enabled: true
+    daemon_reload: true

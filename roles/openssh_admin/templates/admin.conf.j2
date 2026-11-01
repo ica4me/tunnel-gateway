@@ -1,0 +1,10 @@
+# Managed by Ansible; never modify admin access without explicit consent.
+DenyGroups {{ openssh_admin_deny_group }}
+{% if openssh_admin_change_access | bool %}
+Port {{ ssh_admin_port }}
+{% for p in ssh_admin_extra_ports %}
+Port {{ p }}
+{% endfor %}
+PasswordAuthentication {{ openssh_admin_password_authentication }}
+PermitRootLogin {{ openssh_admin_permit_root_login }}
+{% endif %}

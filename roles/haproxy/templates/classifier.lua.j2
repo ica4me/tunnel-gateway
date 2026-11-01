@@ -1,0 +1,24 @@
+-- Managed by Ansible. Read-only classification.
+core.register_fetches("tunnel_route", function(txn)
+    local data = txn.req:dup() or ""
+    if data:sub(1, 4) == "SSH-" then return "ssh" end
+    local method, path = data:match("^([A-Z]+) ([^ ]+) HTTP/1%.[01]\r\n")
+    if not method then return "ws" end
+    if path:match("^/%.well%-known/acme%-challenge/") then return "acme" end
+    local routes = {
+      vmess = "{{ xray_ws_paths.vmess | default('/vmess') }}",
+      vless = "{{ xray_ws_paths.vless | default('/vless') }}",
+      trojan = "{{ xray_ws_paths.trojan | default('/trojan') }}",
+      ss = "{{ xray_ws_paths.ss | default('/ss') }}"
+    }
+    for proto, prefix in pairs(routes) do
+      if path == prefix or path:sub(1,#prefix+1) == prefix.."/" or path:sub(1,#prefix+1) == prefix.."?" then
+        return proto
+      end
+    end
+    local pos = data:find("\r\n\r\n",1,true)
+    if pos and pos+3 == #data and not data:lower():find("upgrade",1,true) then
+      return "web"
+    end
+    return "ws"
+end)

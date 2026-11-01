@@ -1,0 +1,22 @@
+---
+common_packages:
+  - ca-certificates
+  - curl
+  - jq
+  - sqlite3
+  - chrony
+  - vnstat
+  - nftables
+  - unzip
+  - tar
+  - zstd
+  - age
+  - openssl
+  - python3
+  - logrotate
+common_sysctl:
+  net.core.somaxconn: 4096
+  fs.file-max: 2097152
+  net.ipv4.tcp_fastopen: 3
+  net.ipv4.ip_local_port_range: 10240 65535
+common_journald_system_max_use: 200M

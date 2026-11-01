@@ -1,0 +1,5 @@
+---
+- name: Apply tunnel firewall
+  ansible.builtin.command: nft -f /etc/tunnel/nftables.conf
+  changed_when: true
+  when: firewall_enabled | bool

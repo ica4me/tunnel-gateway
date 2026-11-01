@@ -1,0 +1,8 @@
+---
+wsepro_target_host: 127.0.0.1
+wsepro_target_port: '{{ dropbear_ports | first }}'
+wsepro_buf_len: 32768
+wsepro_build_dir: /opt/tunnel/build/wsepro-{{ versions.wsepro.commit }}-{{ versions.wsepro.patch_sha256 }}-go{{
+  versions.golang.version }}
+wsepro_go_arch: '{{ ''amd64'' if ansible_facts.architecture == ''x86_64'' else ''arm64'' }}'
+wsepro_go_dir: /opt/tunnel/go-{{ versions.golang.version }}

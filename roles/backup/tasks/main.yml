@@ -1,0 +1,46 @@
+---
+- name: Create protected backup storage
+  ansible.builtin.file:
+    path: '{{ backup_dir }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+- name: Select backup key paths consistent with CLI settings
+  ansible.builtin.set_fact:
+    backup_age_recipients_file: "{{ tunnelctl_settings.backup_age_recipients_file | default('/etc/tunnel/backup-age-recipients') }}"
+    backup_age_identity_file: "{{ tunnelctl_settings.backup_age_identity | default('/etc/tunnel/backup-age-identity') }}"
+- name: Install public age recipients when configured
+  ansible.builtin.copy:
+    content: "{{ backup_age_recipient }}\n"
+    dest: '{{ backup_age_recipients_file }}'
+    owner: root
+    group: root
+    mode: '0600'
+  when: backup_age_recipient | length > 0
+  no_log: true
+- name: Install private age identity supplied via Vault only
+  ansible.builtin.copy:
+    content: "{{ backup_age_identity }}\n"
+    dest: '{{ backup_age_identity_file }}'
+    owner: root
+    group: root
+    mode: '0600'
+  when: backup_age_identity | length > 0
+  no_log: true
+- name: Validate supplied private age identity
+  ansible.builtin.command:
+    argv: [age-keygen, '-y', '{{ backup_age_identity_file }}']
+  changed_when: false
+  when: backup_age_identity | length > 0
+  no_log: true
+- name: Require valid recipients before enabling encrypted backup
+  ansible.builtin.command:
+    argv: [age, '-R', '{{ backup_age_recipients_file }}', '-o', /dev/null, /dev/null]
+  changed_when: false
+  when: backup_enabled | default(false) | bool
+  no_log: true
+- name: Explain safely disabled backup schedule
+  ansible.builtin.debug:
+    msg: Backup timer disabled. Configure an age recipient and backup_enabled=true; keep its identity offline or in Vault for restore.
+  when: not (backup_enabled | default(false) | bool)

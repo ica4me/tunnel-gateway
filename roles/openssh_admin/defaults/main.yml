@@ -1,0 +1,6 @@
+---
+openssh_admin_change_access: false
+openssh_admin_password_authentication: 'no'
+openssh_admin_permit_root_login: prohibit-password
+openssh_admin_deny_group: tunnelusers
+openssh_admin_dropin_path: /etc/ssh/sshd_config.d/90-tunnel-admin.conf

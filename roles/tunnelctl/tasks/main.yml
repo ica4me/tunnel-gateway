@@ -1,0 +1,148 @@
+---
+- name: Explain disabled CLI deployment
+  ansible.builtin.debug:
+    msg: CLI deployment intentionally skipped (tunnelctl_enabled=false); existing services/accounts preserved.
+  when: not (tunnelctl_enabled | bool)
+- name: Require explicit CLI integration approval
+  ansible.builtin.assert:
+    that:
+      - tunnelctl_integration_approved | bool
+      - (tunnelctl_accounts_imported | default(false) | bool) or (tunnelctl_fresh_install | default(false) | bool)
+      - tunnelctl_settings.domain | default('') == tunnel_domain
+      - tunnelctl_settings.db_path | default('') == '/var/lib/tunnel/tunnel.db'
+    fail_msg: Require integration approval, completed account import and explicit domain/DB settings before enabling
+      CLI.
+  when: tunnelctl_enabled | bool
+- name: Inspect database before permitting fresh initialization
+  ansible.builtin.stat:
+    path: /var/lib/tunnel/tunnel.db
+  register: tunnelctl_existing_db
+  when: tunnelctl_enabled | bool
+- name: Refuse fresh initialization over existing runtime clients
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import json; c=json.load(open('/etc/tunnel/xray/config.json')); assert not any(i.get('settings',{}).get('clients') for i in c.get('inbounds',[])), 'Existing clients require import'"
+  changed_when: false
+  when: tunnelctl_enabled | bool and not tunnelctl_existing_db.stat.exists and not (tunnelctl_accounts_imported | default(false) | bool)
+  no_log: true
+- name: Check controller package entrypoint exists
+  ansible.builtin.stat:
+    path: '{{ tunnelctl_source_dir }}/tunnelctl/__main__.py'
+  delegate_to: localhost
+  become: false
+  register: tunnelctl_entrypoint
+  when: tunnelctl_enabled | bool
+- name: Fail clearly if package entrypoint is missing
+  ansible.builtin.assert:
+    that:
+      - tunnelctl_entrypoint.stat.exists
+    fail_msg: Missing files/tunnelctl/tunnelctl/__main__.py; no implementation will be invented.
+  when: tunnelctl_enabled | bool
+- name: Create CLI package destination
+  ansible.builtin.file:
+    path: '{{ tunnelctl_python_module_dir }}'
+    state: directory
+    mode: '0755'
+  when: tunnelctl_enabled | bool
+- name: Create explicit package directories
+  ansible.builtin.file:
+    path: '{{ tunnelctl_python_module_dir }}/tunnelctl/{{ item }}'
+    state: directory
+    mode: '0755'
+  loop: ['', migrations]
+  when: tunnelctl_enabled | bool
+- name: Deploy only source modules without controller bytecode
+  ansible.builtin.copy:
+    src: '{{ item }}'
+    dest: '{{ tunnelctl_python_module_dir }}/tunnelctl/{{ item | basename }}'
+    mode: '0644'
+  loop: "{{ query('fileglob', tunnelctl_source_dir + '/tunnelctl/*.py') }}"
+  when: tunnelctl_enabled | bool
+- name: Deploy schema migrations
+  ansible.builtin.copy:
+    src: '{{ item }}'
+    dest: '{{ tunnelctl_python_module_dir }}/tunnelctl/migrations/{{ item | basename }}'
+    mode: '0644'
+  loop: "{{ query('fileglob', tunnelctl_source_dir + '/tunnelctl/migrations/*.sql') }}"
+  when: tunnelctl_enabled | bool
+- name: Configure tunnelctl.j2
+  ansible.builtin.template:
+    src: tunnelctl.j2
+    dest: '{{ tunnelctl_wrapper }}'
+    owner: root
+    group: root
+    mode: '0755'
+  when: tunnelctl_enabled | bool
+- name: Configure menu.j2
+  ansible.builtin.template:
+    src: menu.j2
+    dest: '{{ tunnelctl_menu_wrapper }}'
+    owner: root
+    group: root
+    mode: '0755'
+  when: tunnelctl_enabled | bool
+- name: Configure settings.json.j2
+  ansible.builtin.template:
+    src: settings.json.j2
+    dest: /etc/tunnel/settings.json
+    owner: root
+    group: root
+    mode: '0600'
+  when: tunnelctl_enabled | bool
+- name: Verify installed package interface
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/tunnelctl
+      - version
+  changed_when: false
+  when: tunnelctl_enabled | bool
+- name: Regenerate runtime from database source of truth after migrations
+  ansible.builtin.command:
+    argv: [/usr/local/sbin/tunnelctl, config, regenerate, --json]
+  # This reconciliation is compared byte-for-byte by the backend; unchanged runtime is not restarted.
+  changed_when: (tunnelctl_regenerate.stdout | from_json).changed | default(false) | bool
+  register: tunnelctl_regenerate
+  when: tunnelctl_enabled | bool
+  no_log: true
+- name: Install enforcement and backup schedules
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: /etc/systemd/system/{{ item }}
+    mode: '0644'
+  loop:
+    - tunnel-usage.service
+    - tunnel-usage.timer
+    - tunnel-limit.service
+    - tunnel-limit.timer
+    - tunnel-expiry.service
+    - tunnel-expiry.timer
+    - tunnel-backup.service
+    - tunnel-backup.timer
+  when: tunnelctl_enabled | bool
+- name: Require reviewed transactional backup before enabling backup schedule
+  ansible.builtin.assert:
+    that:
+      - tunnelctl_backup_integration_approved | default(false) | bool
+    fail_msg: Backup CLI transactional wiring must be approved before any schedules are enabled.
+  when: tunnelctl_enabled | bool
+- name: Disable backup schedule when encryption is not configured
+  ansible.builtin.systemd:
+    name: tunnel-backup.timer
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when: tunnelctl_enabled | bool and not (backup_enabled | default(false) | bool)
+- name: Enable schedules only with approved CLI integration
+  ansible.builtin.systemd:
+    name: tunnel-{{ item }}.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - usage
+    - limit
+    - expiry
+    - backup
+  when: tunnelctl_enabled | bool and (item != 'backup' or (backup_enabled | default(false) | bool))

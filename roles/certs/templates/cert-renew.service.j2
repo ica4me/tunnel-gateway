@@ -1,0 +1,11 @@
+# Managed by Ansible
+[Unit]
+Description=Renew verified ACME certificate
+After=network-online.target
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart={{ certs_acme_source_dir }}/acme.sh --cron --home {{ certs_acme_home }} --config-home {{ certs_acme_config_home }}
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes

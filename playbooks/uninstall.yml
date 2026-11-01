@@ -1,0 +1,116 @@
+---
+- name: Uninstall verified sole-owned gateway resources
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Require explicit uninstall confirmation
+      ansible.builtin.assert:
+        that: uninstall_confirm | default(false) | bool
+        fail_msg: Require uninstall_confirm=true; account data and backups are preserved by default.
+    - name: Read ownership ledger before any mutation
+      ansible.builtin.slurp:
+        src: /var/lib/tunnel/ansible-owned-resources.json
+      register: uninstall_ledger_raw
+      no_log: true
+    - name: Decode sole-owned resource ledger
+      ansible.builtin.set_fact:
+        uninstall_ledger: '{{ uninstall_ledger_raw.content | b64decode | from_json }}'
+      no_log: true
+    - name: Inspect current resource checksums
+      ansible.builtin.stat:
+        path: '{{ item.key }}'
+        checksum_algorithm: sha256
+      loop: '{{ uninstall_ledger | dict2items }}'
+      register: uninstall_current
+      no_log: true
+    - name: Reject resources modified since Ansible deployment
+      ansible.builtin.assert:
+        that:
+          - not item.stat.exists or item.stat.checksum | default('') == item.item.value
+        fail_msg: 'Resource changed since deployment; refusing to remove foreign/operator content: {{ item.item.key }}'
+      loop: '{{ uninstall_current.results }}'
+      no_log: true
+    - name: Stop and disable owned timers before their jobs
+      ansible.builtin.systemd:
+        name: '{{ item | basename }}'
+        state: stopped
+        enabled: false
+      loop: '{{ uninstall_ledger.keys() | select("match", "^/etc/systemd/system/[^/]+[.]timer$") | list }}'
+    - name: Stop only distro services whose main config is owned
+      ansible.builtin.systemd:
+        name: '{{ item.service }}'
+        state: stopped
+        enabled: false
+      loop:
+        - {service: nginx, config: /etc/nginx/nginx.conf}
+        - {service: haproxy, config: /etc/haproxy/haproxy.cfg}
+        - {service: fail2ban, config: /etc/fail2ban/jail.local}
+      when: item.config in uninstall_ledger
+    - name: Discover loaded and enabled UDPGW instances
+      ansible.builtin.command:
+        argv: [systemctl, '{{ item }}', 'badvpn-udpgw@*.service', --no-legend, --no-pager]
+      loop: [list-units, list-unit-files]
+      register: uninstall_udpgw
+      changed_when: false
+      when: "'/etc/systemd/system/badvpn-udpgw@.service' in uninstall_ledger"
+    - name: Stop and disable all owned UDPGW instances
+      ansible.builtin.systemd:
+        name: '{{ item }}'
+        state: stopped
+        enabled: false
+      loop: >-
+        {{ uninstall_udpgw.results | selectattr('stdout_lines', 'defined') | map(attribute='stdout_lines')
+           | flatten | map('split') | map('first') | reject('equalto', 'badvpn-udpgw@.service') | unique | list }}
+    - name: Stop and disable owned concrete services
+      ansible.builtin.systemd:
+        name: '{{ item | basename }}'
+        state: stopped
+        enabled: false
+      loop: >-
+        {{ uninstall_ledger.keys() | select('match', '^/etc/systemd/system/[^/]+[.]service$')
+           | reject('search', '@') | list }}
+    - name: Read owned firewall table
+      ansible.builtin.command: nft list tables
+      changed_when: false
+      register: uninstall_nft
+      when: "'/etc/tunnel/nftables.conf' in uninstall_ledger"
+    - name: Remove only project firewall table without flushing foreign rules
+      ansible.builtin.command: nft delete table inet tunnel_gateway
+      changed_when: true
+      when:
+        - "'/etc/tunnel/nftables.conf' in uninstall_ledger"
+        - "'table inet tunnel_gateway' in uninstall_nft.stdout"
+    - name: Remove exact owned SSH Include preserving admin access directives
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: '^Include /etc/ssh/sshd_config.d/90-tunnel-admin.conf$'
+        state: absent
+        validate: /usr/sbin/sshd -t -f %s
+      when: "'/etc/ssh/sshd_config.d/90-tunnel-admin.conf' in uninstall_ledger"
+      notify: Reload preserved admin SSH
+    - name: Remove checksum-verified owned files only
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: absent
+      loop: '{{ uninstall_ledger.keys() | list }}'
+    - name: Reload systemd after unit removal
+      ansible.builtin.systemd:
+        daemon_reload: true
+    - name: Remove protected account data only after separate confirmation
+      ansible.builtin.file:
+        path: '{{ item }}'
+        state: absent
+      loop: [/var/lib/tunnel/tunnel.db, /var/lib/tunnel/tunnel.db-wal, /var/lib/tunnel/tunnel.db-shm]
+      when: uninstall_data_confirm | default(false) | bool
+    - name: Report preserved operator state
+      ansible.builtin.debug:
+        msg: >-
+          Owned ledger resources removed. Foreign configs, package defaults, admin port/auth settings,
+          Linux accounts, certificates, backups, build caches and custom site data are preserved;
+          account deletion requires the parent-approved DB/CLI workflow before uninstall.
+  handlers:
+    - name: Reload preserved admin SSH
+      ansible.builtin.systemd:
+        name: ssh
+        state: reloaded

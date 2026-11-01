@@ -1,0 +1,7 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel usage job
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tunnelctl enforce quota
+UMask=0077

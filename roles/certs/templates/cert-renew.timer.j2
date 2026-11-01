@@ -1,0 +1,9 @@
+# Managed by Ansible
+[Unit]
+Description=Daily certificate renewal check
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=yes
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,99 @@
+---
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/tunnel/xray
+    - '{{ xray_data_dir }}'
+    - /var/log/xray
+    - '{{ xray_build_dir }}'
+- name: Download verified pinned Xray artifact
+  ansible.builtin.get_url:
+    url: '{{ versions.xray[''linux_'' + xray_artifact_arch + ''_url''] }}'
+    dest: '{{ xray_build_dir }}/Xray.zip'
+    checksum: sha256:{{ versions.xray['linux_' + xray_artifact_arch + '_sha256'] }}
+    mode: '0644'
+- name: Extract pinned Xray artifact
+  ansible.builtin.unarchive:
+    src: '{{ xray_build_dir }}/Xray.zip'
+    dest: '{{ xray_build_dir }}'
+    remote_src: true
+    creates: '{{ xray_build_dir }}/xray'
+- name: Install verified Xray binary
+  ansible.builtin.copy:
+    src: '{{ xray_build_dir }}/xray'
+    dest: '{{ xray_bin }}'
+    mode: '0755'
+    remote_src: true
+  notify: Restart Xray
+- name: Install verified bundled geodata
+  ansible.builtin.copy:
+    src: '{{ xray_build_dir }}/{{ item }}'
+    dest: '{{ xray_data_dir }}/{{ item }}'
+    remote_src: true
+    mode: '0644'
+  loop:
+    - geoip.dat
+    - geosite.dat
+- name: Configure base.json.j2
+  ansible.builtin.template:
+    src: base.json.j2
+    dest: '{{ xray_base_path }}'
+    owner: root
+    group: root
+    mode: '0644'
+    validate: '{{ xray_bin }} run -test -config %s'
+- name: Initialize runtime only if no runtime exists
+  ansible.builtin.copy:
+    src: '{{ xray_base_path }}'
+    dest: '{{ xray_config_path }}'
+    remote_src: true
+    force: false
+    mode: '0600'
+    validate: '{{ xray_bin }} run -test -config %s'
+  notify: Restart Xray
+- name: Protect preserved runtime config containing account secrets
+  ansible.builtin.file:
+    path: '{{ xray_config_path }}'
+    mode: '0600'
+    owner: root
+    group: root
+- name: Refuse unsafe runtime replacement from empty base
+  ansible.builtin.assert:
+    that:
+      - not (xray_manage_runtime_config | bool)
+    fail_msg: Runtime clients are DB-owned. Use tunnelctl config regenerate; never overwrite accounts from base.
+- name: Configure xray.service.j2
+  ansible.builtin.template:
+    src: xray.service.j2
+    dest: /etc/systemd/system/xray.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Xray
+- name: Configure logrotate.j2
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: /etc/logrotate.d/tunnel-xray
+    owner: root
+    group: root
+    mode: '0644'
+- name: Validate preserved runtime config
+  ansible.builtin.command:
+    argv:
+      - '{{ xray_bin }}'
+      - run
+      - -test
+      - -config
+      - '{{ xray_config_path }}'
+  changed_when: false
+- name: Enable xray
+  ansible.builtin.systemd:
+    name: xray
+    state: started
+    enabled: true
+    daemon_reload: true

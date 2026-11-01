@@ -1,0 +1,57 @@
+---
+- name: Require real active rollback timer before firewall activation
+  ansible.builtin.command: systemctl is-active tunnel-firewall-rollback.timer
+  changed_when: false
+  when: firewall_enabled | default(true) | bool
+- name: Require explicitly preserved SSH connection port
+  ansible.builtin.assert:
+    that:
+      - (ansible_port | default(22) | int) in (firewall_allowed_tcp_ports | map('int') | list)
+    fail_msg: Current Ansible SSH port must be explicitly allowed before firewall activation.
+  when: firewall_enabled | bool
+- name: Configure nftables.conf.j2
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/tunnel/nftables.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/nft --check --file %s
+  notify: Apply tunnel firewall
+- name: Configure tunnel-firewall.service.j2
+  ansible.builtin.template:
+    src: tunnel-firewall.service.j2
+    dest: /etc/systemd/system/tunnel-firewall.service
+    owner: root
+    group: root
+    mode: '0644'
+- name: Read runtime owned firewall input chain
+  ansible.builtin.command:
+    argv:
+      - nft
+      - list
+      - chain
+      - inet
+      - tunnel_gateway
+      - input
+  register: firewall_runtime_input
+  failed_when: false
+  changed_when: false
+  when: firewall_enabled | bool
+- name: Apply owned firewall table immediately when runtime chain is missing
+  ansible.builtin.command:
+    argv:
+      - nft
+      - -f
+      - /etc/tunnel/nftables.conf
+  changed_when: true
+  when:
+    - firewall_enabled | bool
+    - firewall_runtime_input.rc != 0 or "policy drop" not in firewall_runtime_input.stdout
+- name: Enable owned firewall policy without flushing foreign rules
+  ansible.builtin.systemd:
+    name: tunnel-firewall
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: firewall_enabled | bool

@@ -1,0 +1,106 @@
+---
+- name: Tunnel gateway foundation and services
+  hosts: all
+  become: true
+  gather_facts: true
+  pre_tasks:
+    - name: Load pinned version manifest
+      ansible.builtin.include_vars:
+        file: ../inventories/example/group_vars/all/versions.yml
+      tags:
+        - always
+    - name: Load safe example defaults into isolated namespace
+      ansible.builtin.include_vars:
+        file: ../inventories/example/group_vars/all/main.yml
+        name: gateway_safe_defaults
+      tags:
+        - always
+    - name: Apply only missing gateway variables preserving inventory overrides
+      ansible.builtin.set_fact:
+        '{{ item.key }}': '{{ item.value }}'
+      loop: '{{ gateway_safe_defaults | dict2items }}'
+      when: item.key not in vars
+      tags:
+        - always
+    - name: Require explicit deployment domain and valid certificate mode
+      ansible.builtin.assert:
+        that:
+          - tunnel_domain | length > 0
+          - tunnel_domain is match('^[a-zA-Z0-9][a-zA-Z0-9.-]+[a-zA-Z0-9]$')
+          - cert_mode in ['selfsigned', 'http01', 'dns_cloudflare']
+        fail_msg: Supply tunnel_domain and cert_mode explicitly; no production fallback certificate.
+      tags:
+        - always
+    - name: Run foundation preflight checks
+      ansible.builtin.include_role:
+        name: preflight
+        tasks_from: foundation.yml
+      tags:
+        - always
+        - preflight
+  roles:
+    - role: common
+      tags:
+        - common
+    - role: firewall
+      tags:
+        - firewall
+    - role: certs
+      tags:
+        - certs
+    - role: openssh_admin
+      tags:
+        - openssh_admin
+    - role: dropbear
+      tags:
+        - dropbear
+    - role: badvpn
+      tags:
+        - badvpn
+    - role: wsepro
+      tags:
+        - wsepro
+    - role: xray
+      tags:
+        - xray
+    - role: nginx
+      tags:
+        - nginx
+    - role: haproxy
+      tags:
+        - haproxy
+    - role: fail2ban
+      tags:
+        - fail2ban
+    - role: backup
+      tags:
+        - backup
+    - role: tunnelctl
+      tags:
+        - tunnelctl
+  handlers:
+    - name: Restart Ws-Epro
+      ansible.builtin.systemd:
+        name: ws-epro
+        state: restarted
+        daemon_reload: true
+  post_tasks:
+    - name: Apply notified configuration changes
+      ansible.builtin.meta: flush_handlers
+    - name: Clear owned failed units during explicit recovery
+      ansible.builtin.command: systemctl reset-failed {{ item }}
+      changed_when: true
+      loop: [dropbear-tunnel, ws-epro, xray, nginx, haproxy]
+      when: gateway_reconcile_restart | default(false) | bool
+    - name: Recover interrupted deployment service notifications when explicitly requested
+      ansible.builtin.systemd:
+        name: '{{ item }}'
+        state: restarted
+        daemon_reload: true
+      loop: [tunnel-firewall, dropbear-tunnel, ws-epro, xray, nginx, haproxy]
+      when: gateway_reconcile_restart | default(false) | bool
+    - name: Record deployed owned resource checksums
+      ansible.builtin.include_role:
+        name: common
+        tasks_from: ownership.yml
+      when: "'all' in ansible_run_tags"

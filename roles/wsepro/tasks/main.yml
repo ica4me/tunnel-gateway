@@ -1,0 +1,96 @@
+---
+- name: Install patch utility
+  ansible.builtin.apt:
+    name: patch
+    state: present
+    policy_rc_d: 101
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - '{{ wsepro_build_dir }}'
+    - '{{ wsepro_go_dir }}'
+- name: Download verified Go toolchain
+  ansible.builtin.get_url:
+    url: '{{ versions.golang[''linux_'' + wsepro_go_arch + ''_url''] }}'
+    checksum: sha256:{{ versions.golang['linux_' + wsepro_go_arch + '_sha256'] }}
+    dest: '{{ wsepro_go_dir }}/go.tar.gz'
+    mode: '0644'
+- name: Extract pinned Go toolchain
+  ansible.builtin.unarchive:
+    src: '{{ wsepro_go_dir }}/go.tar.gz'
+    dest: '{{ wsepro_go_dir }}'
+    remote_src: true
+    creates: '{{ wsepro_go_dir }}/go/bin/go'
+- name: Fetch exact checksum-verified upstream v2 source
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/ica4me/Ws-Epro/{{ versions.wsepro.commit }}/main-v2.go
+    checksum: sha256:{{ versions.wsepro.source_sha256 }}
+    dest: '{{ wsepro_build_dir }}/upstream.go'
+    mode: '0644'
+- name: Verify local compatibility patch checksum
+  ansible.builtin.assert:
+    that:
+      - (lookup('ansible.builtin.file', role_path + '/files/patches/0001-bounded-ssh-preamble.patch', rstrip=false)
+        | hash('sha256')) == versions.wsepro.patch_sha256
+- name: Install verified compatibility patch
+  ansible.builtin.copy:
+    src: patches/0001-bounded-ssh-preamble.patch
+    dest: '{{ wsepro_build_dir }}/fix.patch'
+    mode: '0644'
+- name: Apply bounded preamble compatibility patch once per artifact
+  ansible.builtin.command:
+    argv:
+      - patch
+      - --batch
+      - --output
+      - '{{ wsepro_build_dir }}/main.go'
+      - '{{ wsepro_build_dir }}/upstream.go'
+      - '{{ wsepro_build_dir }}/fix.patch'
+    creates: '{{ wsepro_build_dir }}/main.go'
+- name: Build patched relay with pinned Go toolchain
+  ansible.builtin.command:
+    argv:
+      - '{{ wsepro_go_dir }}/go/bin/go'
+      - build
+      - -trimpath
+      - -o
+      - '{{ wsepro_build_dir }}/ws-epro'
+      - '{{ wsepro_build_dir }}/main.go'
+    creates: '{{ wsepro_build_dir }}/ws-epro'
+  environment:
+    CGO_ENABLED: '0'
+    GOTOOLCHAIN: local
+- name: Install content-addressed relay binary
+  ansible.builtin.copy:
+    src: '{{ wsepro_build_dir }}/ws-epro'
+    remote_src: true
+    dest: /usr/local/bin/ws-epro
+    mode: '0755'
+  notify: Restart Ws-Epro
+- name: Configure ws-epro.conf.j2
+  ansible.builtin.template:
+    src: ws-epro.conf.j2
+    dest: /etc/tunnel/ws-epro.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Ws-Epro
+- name: Configure ws-epro.service.j2
+  ansible.builtin.template:
+    src: ws-epro.service.j2
+    dest: /etc/systemd/system/ws-epro.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart Ws-Epro
+- name: Enable ws-epro
+  ansible.builtin.systemd:
+    name: ws-epro
+    state: started
+    enabled: true
+    daemon_reload: true

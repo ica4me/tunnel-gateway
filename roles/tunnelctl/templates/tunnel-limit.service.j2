@@ -1,0 +1,7 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel limit job
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tunnelctl enforce limit
+UMask=0077

@@ -1,0 +1,8 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel expiry schedule
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+[Install]
+WantedBy=timers.target

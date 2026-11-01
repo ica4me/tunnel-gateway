@@ -1,0 +1,61 @@
+---
+- name: Install Nginx without starting distro public default
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+    policy_rc_d: 101
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - '{{ nginx_camouflage_root }}'
+    - '{{ nginx_acme_root }}'
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/systemd/system/nginx.service.d
+- name: Configure index.html.j2
+  ansible.builtin.template:
+    src: index.html.j2
+    dest: '{{ nginx_camouflage_root }}/index.html'
+    owner: root
+    group: root
+    mode: '0644'
+- name: Deploy operator-provided camouflage site
+  ansible.builtin.copy:
+    src: '{{ nginx_camouflage_site_src }}/'
+    dest: '{{ nginx_camouflage_root }}/'
+    mode: '0644'
+  when: nginx_camouflage_site_src | length > 0
+- name: Configure nginx.conf.j2
+  ansible.builtin.template:
+    src: nginx.conf.j2
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/nginx -t -c %s
+  notify: Reload Nginx
+- name: Configure hardening.conf.j2
+  ansible.builtin.template:
+    src: hardening.conf.j2
+    dest: /etc/systemd/system/nginx.service.d/tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload Nginx
+- name: Enable nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: started
+    enabled: true
+    daemon_reload: true

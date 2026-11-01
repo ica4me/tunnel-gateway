@@ -1,0 +1,68 @@
+---
+- name: Create tunnel account deny group
+  ansible.builtin.group:
+    name: '{{ openssh_admin_deny_group }}'
+    state: present
+- name: Create managed directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /etc/ssh/sshd_config.d
+- name: Require lockout consent for port/auth changes
+  ansible.builtin.assert:
+    that:
+      - openssh_admin_access_confirm | default(false) | bool
+    fail_msg: Set openssh_admin_access_confirm=true for explicit admin access changes; keep a recovery console.
+  when: openssh_admin_change_access | bool
+- name: Configure admin.conf.j2
+  ansible.builtin.template:
+    src: admin.conf.j2
+    dest: /etc/tunnel/sshd-admin.candidate
+    owner: root
+    group: root
+    mode: '0644'
+- name: Install validated admin restriction candidate
+  ansible.builtin.copy:
+    src: /etc/tunnel/sshd-admin.candidate
+    remote_src: true
+    dest: '{{ openssh_admin_dropin_path }}'
+    mode: '0644'
+  notify: Reload admin SSH
+- name: Include only owned restriction without enabling foreign drop-ins
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    line: Include {{ openssh_admin_dropin_path }}
+    insertbefore: BOF
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload admin SSH
+- name: Validate full SSH configuration after installing candidate
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -t
+  changed_when: false
+  notify: Reload admin SSH
+- name: Require active Include for sshd drop-ins
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -T
+  register: openssh_admin_effective
+  changed_when: false
+- name: Verify tunnel group restriction is effective
+  ansible.builtin.assert:
+    that:
+      - ('denygroups ' ~ openssh_admin_deny_group) in (openssh_admin_effective.stdout | lower)
+    fail_msg: sshd_config must include and apply DenyGroups from openssh_admin_dropin_path.
+- name: Disable Ubuntu socket activation on explicit access change
+  ansible.builtin.systemd:
+    name: ssh.socket
+    state: stopped
+    enabled: false
+  when: openssh_admin_change_access | bool and ansible_facts.distribution == 'Ubuntu' and ansible_facts.distribution_version
+    == '24.04'
+  notify: Reload admin SSH

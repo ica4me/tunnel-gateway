@@ -1,0 +1,7 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel backup job
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tunnelctl backup create
+UMask=0077

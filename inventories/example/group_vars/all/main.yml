@@ -1,0 +1,54 @@
+---
+tunnel_domain: ''
+admin_email: ''
+timezone: Asia/Jakarta
+ssh_admin_port: 22
+ssh_admin_extra_ports: []
+cert_mode: dns_cloudflare
+acme_enabled: true
+acme_ca: letsencrypt
+acme_cloudflare_token: '{{ vault_cloudflare_api_token | default('''') }}'
+tunnelctl_enabled: false
+backup_enabled: true
+fail2ban_enabled: true
+camouflage_enabled: true
+dropbear_ports:
+  - 143
+wsepro_port: 10015
+udpgw_ports:
+  - 7300
+xray_ws_paths:
+  vmess: /vmess
+  vless: /vless
+  trojan: /trojan
+  ss: /ss
+xray_grpc_names:
+  vmess: vmess-grpc
+  vless: vless-grpc
+  trojan: trojan-grpc
+xray_ss_method: chacha20-ietf-poly1305
+xray_api_port: 10085
+xray_manage_runtime_config: false
+haproxy_inspect_delay: 2s
+extra_http_ports: []
+extra_https_ports: []
+firewall_enabled: true
+firewall_allow_icmp: true
+backup_keep: 7
+backup_include_certs: false
+backup_time: 03:00
+backup_encrypt: true
+backup_passphrase: '{{ vault_backup_passphrase | default('''') }}'
+systemd_hardening_enabled: true
+xray_ws_ports:
+  vmess: 10001
+  vless: 10002
+  trojan: 10003
+  ss: 10004
+xray_grpc_ports:
+  vmess: 10011
+  vless: 10012
+  trojan: 10013
+nginx_web_port: 8080
+nginx_h2c_port: 10010
+xray_block_bittorrent: true

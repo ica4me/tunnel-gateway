@@ -1,0 +1,8 @@
+---
+- name: Restart journald
+  ansible.builtin.systemd:
+    name: systemd-journald
+    state: restarted
+- name: Apply sysctl
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/99-tunnel.conf
+  changed_when: true

@@ -1,0 +1,7 @@
+# Managed by Ansible
+[Unit]
+Description=Tunnel expiry job
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tunnelctl enforce expiry
+UMask=0077

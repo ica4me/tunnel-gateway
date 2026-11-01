@@ -1,0 +1,4 @@
+---
+dropbear_bind_address: 127.0.0.1
+dropbear_banner_path: /etc/tunnel/banner.txt
+dropbear_banner: Authorized access only.

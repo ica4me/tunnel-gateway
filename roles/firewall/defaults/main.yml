@@ -1,0 +1,4 @@
+---
+firewall_allowed_tcp_ports: "{{ [ssh_admin_port | int] + (ssh_admin_extra_ports | default([]) | map('int') | list)\n\
+  \   + [80, 443] + (extra_http_ports | default([]) | map('int') | list)\n   + (extra_https_ports | default([])\
+  \ | map('int') | list) }}"

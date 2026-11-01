@@ -1,0 +1,10 @@
+---
+- name: Validate admin SSH before reload
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+  listen: Reload admin SSH
+- name: Reload admin SSH service
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded
+  listen: Reload admin SSH
