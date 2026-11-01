@@ -2,3 +2,13 @@
 dropbear_bind_address: 127.0.0.1
 dropbear_banner_path: /etc/tunnel/banner.txt
 dropbear_banner: Authorized access only.
+# Build the pinned upstream release instead of using the distro binary (same behaviour on every OS).
+dropbear_build_from_source: true
+# Enable diffie-hellman-group14-sha1 KEX and hmac-sha1 for legacy tunnel apps (HTTP Custom etc.).
+# Modern clients still negotiate sntrup761/curve25519 + chacha20-poly1305.
+dropbear_legacy_algorithms: true
+dropbear_variant: "{{ 'legacy' if dropbear_legacy_algorithms | bool else 'std' }}"
+dropbear_build_dir: /opt/tunnel/build/dropbear-{{ versions.dropbear.version }}-{{ dropbear_variant }}
+dropbear_install_dir: /opt/tunnel/dropbear/{{ versions.dropbear.version }}-{{ dropbear_variant }}
+dropbear_bin: "{{ (dropbear_install_dir ~ '/dropbear') if dropbear_build_from_source | bool else '/usr/sbin/dropbear' }}"
+dropbear_key_bin: "{{ (dropbear_install_dir ~ '/dropbearkey') if dropbear_build_from_source | bool else '/usr/bin/dropbearkey' }}"

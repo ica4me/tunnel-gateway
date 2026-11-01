@@ -4,7 +4,7 @@ Description=Dropbear loopback tunnel listener
 After=network.target
 [Service]
 Type=simple
-ExecStart=/usr/sbin/dropbear -E -F -w -g -r /etc/dropbear/dropbear_ed25519_host_key -b {{ dropbear_banner_path }} {% for p in dropbear_ports %}-p {{ dropbear_bind_address }}:{{ p }} {% endfor %}{{ '\n' }}Restart=always
+ExecStart={{ dropbear_bin }} -E -F -w -g -r /etc/dropbear/dropbear_ed25519_host_key -b {{ dropbear_banner_path }} {% for p in dropbear_ports %}-p {{ dropbear_bind_address }}:{{ p }} {% endfor %}{{ '\n' }}Restart=always
 RestartSec=2
 LimitNOFILE={{ tuning_nofile | default(65535) }}
 ProtectSystem=strict

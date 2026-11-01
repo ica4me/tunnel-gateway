@@ -1,0 +1,6 @@
+/* Managed by Ansible (tunnel-gateway). Compile-time options for the tunnel Dropbear. */
+{% if dropbear_legacy_algorithms | bool %}
+/* Legacy tunnel apps (HTTP Custom, HTTP Injector, ...) only offer these. */
+#define DROPBEAR_DH_GROUP14_SHA1 1
+#define DROPBEAR_SHA1_HMAC 1
+{% endif %}

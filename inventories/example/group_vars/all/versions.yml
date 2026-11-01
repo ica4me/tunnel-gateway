@@ -8,6 +8,12 @@ versions:
     linux_amd64_sha256: e4bd9119f50ae7c41658b1abd0679ae06f98bd864a2907ff33f2f2cf7081b214
     linux_arm64_url: https://github.com/XTLS/Xray-core/releases/download/v26.10.31/Xray-linux-arm64-v8a.zip
     linux_arm64_sha256: 1811c8f1da0c3b6dc707ebaf1c8390e987ba39859a8f0a7aadd8526157f2ec8d
+  dropbear:
+    # Built from source on every OS: distro builds since 2025 drop diffie-hellman-group14-sha1,
+    # which HTTP Custom / HTTP Injector and similar tunnel apps still require.
+    version: "2026.94"
+    url: https://codeload.github.com/mkj/dropbear/tar.gz/refs/tags/DROPBEAR_2026.94
+    sha256: 827d3f6e510e7554ee18d5c6a00dfee1a6a555559495e65e2e8f8d41c79eed84
   wsepro:
     commit: f04d2f1a5c32273af96c4dfb0baa9ef5754757f9
     source_sha256: 351232825d49daca4f79e00ce69b85d6ea8241260fa500463a2d42b8c7c01d8c

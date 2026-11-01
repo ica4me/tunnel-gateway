@@ -196,18 +196,78 @@ def box(rows, label_width=18, width=WIDTH, color=True):
 
 # ---------------------------------------------------------------- input
 
+CONTROL_RE = re.compile(r'\x1b\[[0-9;?]*[ -/]*[@-~]|[\x00-\x1f\x7f]')
+
+
+def clean(text):
+    """Strip terminal escape sequences (e.g. bracketed paste) and control characters from pasted input."""
+    return CONTROL_RE.sub('', text or '').strip()
+
+
+def flush_input():
+    """Discard type-ahead/pasted leftovers so they cannot answer the next question by accident."""
+    if sys.stdin.isatty():
+        try:
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            pass
+
+
 def ask(prompt):
     try:
-        return input(prompt).strip()
+        return clean(input(prompt))
     except EOFError:
         return ''
 
 
+def ask_text(prompt, validate=None, example=''):
+    """Required value: an empty line (e.g. a paste that starts with a newline) asks again; 0/q cancels."""
+    while True:
+        text = ask(prompt)
+        if text in ('0', 'q', 'Q'):
+            return None
+        if not text:
+            write('Kosong. Ketik/tempel nilainya lalu Enter, atau 0 untuk batal.')
+            continue
+        value = validate(text) if validate else text
+        if value:
+            return value
+        write('Tidak valid{0}. Coba lagi, atau 0 untuk batal.'.format(': contoh ' + example if example else ''))
+
+
+DOMAIN_RE = re.compile(r'^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$')
+
+
+def as_domain(text):
+    """Accept pasted forms like 'https://Vpn.Domain.com/' and return 'vpn.domain.com', or None."""
+    value = re.sub(r'^[a-z]+://', '', text.strip().lower()).split('/')[0].split(':')[0].rstrip('.')
+    return value if DOMAIN_RE.match(value) else None
+
+
+def as_email(text):
+    value = text.strip()
+    return value if EMAIL_RE.match(value) and not value.endswith(('@domain.com', '@example.com')) else None
+
+
+YES_WORDS = ('y', 'ya', 'yes')
+NO_WORDS = ('n', 'no', 't', 'tidak')
+
+
 def ask_yes(prompt, default=False):
-    answer = ask(prompt).lower()
-    if not answer:
-        return default
-    return answer in ('y', 'ya', 'yes')
+    """y/N question: Enter uses the default (shown in capitals) and echoes the chosen answer."""
+    flush_input()
+    while True:
+        answer = ask(prompt).lower()
+        if answer in YES_WORDS:
+            return True
+        if answer in NO_WORDS:
+            return False
+        if not answer:
+            write(paint('  -> {0} (default)'.format('ya' if default else 'tidak'), CYAN))
+            return default
+        write('Jawab y atau n (Enter = {0}).'.format('ya' if default else 'tidak'))
 
 
 def ask_int(prompt, minimum=1, default=None):
@@ -230,14 +290,8 @@ def ask_quota(prompt):
         write('Format tidak valid. Contoh: 30G, 500M, 0.')
 
 
-def ask_username(prompt='Username (huruf kecil/angka/_ 3-32; kosong = batal): '):
-    while True:
-        text = ask(prompt)
-        if not text:
-            return None
-        if USERNAME_RE.match(text):
-            return text
-        write('Username tidak valid. Contoh: budi_01')
+def ask_username(prompt='Username (huruf kecil/angka/_ 3-32; 0 = batal): '):
+    return ask_text(prompt, lambda t: t if USERNAME_RE.match(t) else None, 'budi_01')
 
 
 # ---------------------------------------------------------------- data

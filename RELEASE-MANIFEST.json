@@ -76,16 +76,16 @@
     "size": 17897
   },
   "files/tunnelctl/tunnelctl/menu_system.py": {
-    "sha256": "170baf539b946e8fd7d84bf60c6434af3f1fca8687d6d797582310ac92470c3e",
-    "size": 28026
+    "sha256": "45e438c1b637558978c4b475920f803e6fffeb786f1d55d9c30449b56b723b22",
+    "size": 27884
   },
   "files/tunnelctl/tunnelctl/menu_telegram.py": {
     "sha256": "4035e5e6bcb3507765665775edb8915e8f1db03be28583c77e90edc01a322ec0",
     "size": 17647
   },
   "files/tunnelctl/tunnelctl/menu_ui.py": {
-    "sha256": "88ee15e5c772dbf6f4e8a74b322caa7b3286d0959044abb2b13c291074f35fa5",
-    "size": 11962
+    "sha256": "e6228cb553ba9cd9da423fdaeb8b7762c602e8f7ba36cf2bd699045d5a871f47",
+    "size": 14022
   },
   "files/tunnelctl/tunnelctl/migrations/0001_init.sql": {
     "sha256": "ad6d7053f0b79a7a5c11ce2a2166ddde2d68701a75b0b520e1c376fb55ea0365",
@@ -108,8 +108,8 @@
     "size": 1689
   },
   "inventories/example/group_vars/all/versions.yml": {
-    "sha256": "5568eb4125228d2013574ae78a605ea0696b2a85e4bc041e606682f5683528a3",
-    "size": 1596
+    "sha256": "0f55ea8179062c5ab2a6ffc3d17dabee0f809a7142594481f2ac91cc67f4f664",
+    "size": 1967
   },
   "inventories/new-server/hosts.yml": {
     "sha256": "00987941b1d772f7f74281b26de9b159da6378d899b79559348ec01b5a8f768f",
@@ -292,24 +292,28 @@
     "size": 52
   },
   "roles/dropbear/defaults/main.yml": {
-    "sha256": "de3a3c3482b9430ee162df1a5a079c322710cfcfe4ea8892eba825651db2344e",
-    "size": 123
+    "sha256": "da7896fd5094a85f7fef8d7e33d4db14ad253a6ac8a8b1ae89d4e04049c16c65",
+    "size": 999
   },
   "roles/dropbear/handlers/main.yml": {
     "sha256": "47e0a5f1d7f863b4f16e99c3a4e19821490a66719def7b7ca977340dfe0dc437",
     "size": 134
   },
   "roles/dropbear/tasks/main.yml": {
-    "sha256": "3fed3ef0857af66c1fda1177f7a09fafebba9020f2b4b3e15eb023f785d7019d",
-    "size": 1348
+    "sha256": "8691b2e96a1b4edc8d219377c2ae7d99bb26c493346bf13991dc847e7de52cb5",
+    "size": 3772
   },
   "roles/dropbear/templates/banner.txt.j2": {
     "sha256": "c0d9aab6024c2947da0012063285da0d31b453e7ca26695eb7e03ef6dadb495f",
     "size": 43
   },
   "roles/dropbear/templates/dropbear-tunnel.service.j2": {
-    "sha256": "c9913e7aa39b5dc849df5e1f052f5e778f225ab107d628526fa59949fa917aac",
+    "sha256": "725dc044bca974722ebb32b1691b6235d681d1f866fb33a78ff4e204bceae5b2",
     "size": 731
+  },
+  "roles/dropbear/templates/localoptions.h.j2": {
+    "sha256": "70c36414f9079d973d2254005ebeef70d6f162b2a7b21a2a7d963be06e8ba484",
+    "size": 285
   },
   "roles/fail2ban/defaults/main.yml": {
     "sha256": "88a7afb47c8027db0e6bc330ca1ab34957c4447271f64443e9adf8f976375682",

@@ -20,10 +20,72 @@
     mode: '0755'
   loop:
     - /etc/dropbear
+- name: Create Dropbear build and install directories
+  ansible.builtin.file:
+    path: '{{ item }}'
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - '{{ dropbear_build_dir }}'
+    - '{{ dropbear_install_dir }}'
+  when: dropbear_build_from_source | bool
+- name: Download verified pinned Dropbear source
+  ansible.builtin.get_url:
+    url: '{{ versions.dropbear.url }}'
+    dest: /opt/tunnel/build/dropbear-{{ versions.dropbear.version }}.tar.gz
+    checksum: 'sha256:{{ versions.dropbear.sha256 }}'
+    mode: '0644'
+  when: dropbear_build_from_source | bool
+- name: Extract pinned Dropbear source
+  ansible.builtin.unarchive:
+    src: /opt/tunnel/build/dropbear-{{ versions.dropbear.version }}.tar.gz
+    dest: '{{ dropbear_build_dir }}'
+    remote_src: true
+    extra_opts: [--strip-components=1]
+    creates: '{{ dropbear_build_dir }}/configure'
+  when: dropbear_build_from_source | bool
+- name: Configure compile-time algorithm options
+  ansible.builtin.template:
+    src: localoptions.h.j2
+    dest: '{{ dropbear_build_dir }}/localoptions.h'
+    mode: '0644'
+  register: dropbear_localoptions
+  when: dropbear_build_from_source | bool
+- name: Discard previous build when compile-time options changed
+  ansible.builtin.command:
+    argv: [make, clean]
+    chdir: '{{ dropbear_build_dir }}'
+    removes: '{{ dropbear_build_dir }}/Makefile'
+  when: dropbear_build_from_source | bool and dropbear_localoptions is changed
+- name: Configure Dropbear build (no zlib, no PAM - passwords from /etc/shadow like the distro build)
+  ansible.builtin.command:
+    argv: [./configure, --disable-zlib, --disable-pam]
+    chdir: '{{ dropbear_build_dir }}'
+    creates: '{{ dropbear_build_dir }}/Makefile'
+  when: dropbear_build_from_source | bool
+- name: Build Dropbear server and key tool
+  ansible.builtin.command:
+    argv: [make, '-j{{ ansible_facts.processor_vcpus | default(1) }}', 'PROGRAMS=dropbear dropbearkey']
+    chdir: '{{ dropbear_build_dir }}'
+    creates: '{{ dropbear_build_dir }}/dropbear'
+  when: dropbear_build_from_source | bool
+- name: Install built Dropbear binaries
+  ansible.builtin.copy:
+    src: '{{ dropbear_build_dir }}/{{ item }}'
+    dest: '{{ dropbear_install_dir }}/{{ item }}'
+    remote_src: true
+    owner: root
+    group: root
+    mode: '0755'
+  loop: [dropbear, dropbearkey]
+  notify: Restart Dropbear tunnel
+  when: dropbear_build_from_source | bool
 - name: Create persistent ed25519 host key
   ansible.builtin.command:
     argv:
-      - dropbearkey
+      - '{{ dropbear_key_bin }}'
       - -t
       - ed25519
       - -f

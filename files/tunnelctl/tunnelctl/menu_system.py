@@ -136,21 +136,19 @@ def _set_domain(conf, ip, current, ip_mode, inventory):
     ui.write('Langkah sebelum mengisi domain:')
     ui.write('  1. Buat A record domain -> {0} di Cloudflare (DNS only / awan abu-abu).'.format(ip))
     ui.write('  2. Tunggu DNS aktif (biasanya 1-5 menit).')
-    new = ui.ask('\nDomain {0}(kosong = batal): '.format('baru ' if not ip_mode else '')).lower().rstrip('.')
+    ui.write('')
+    new = ui.ask_text('Domain {0}(0 = batal): '.format('baru ' if not ip_mode else ''), ui.as_domain, 'vpn.domainanda.com')
     if not new:
         ui.write('Dibatalkan.')
         return
-    if not DOMAIN_RE.match(new):
-        ui.fail('format domain tidak valid: {0}'.format(new))
-        return
-    email = inventory.get('admin_email') or ''
-    if not EMAIL_RE.match(email) or email.endswith(('@domain.com', '@example.com')):
-        email = ui.ask('Email untuk Let\'s Encrypt (pemberitahuan masa berlaku): ').strip()
-        if not EMAIL_RE.match(email):
-            ui.fail('email tidak valid.')
+    ui.write('Domain: {0}'.format(new))
+    email = ui.as_email(inventory.get('admin_email') or '')
+    if not email:
+        email = ui.ask_text('Email untuk Let\'s Encrypt (0 = batal): ', ui.as_email, 'admin@domainanda.com')
+        if not email:
+            ui.write('Dibatalkan.')
             return
-    else:
-        ui.write('Email Let\'s Encrypt: {0}'.format(email))
+    ui.write('Email Let\'s Encrypt: {0}'.format(email))
     dns = info.dns_lookup(new)
     match = bool(ip) and ip in dns
     ui.write_lines(ui.box([('#', 'PEMERIKSAAN DOMAIN'), ('Domain', new), ('IP server', ip or '-'),
@@ -185,11 +183,11 @@ def _set_domain(conf, ip, current, ip_mode, inventory):
 
 def _issue_for_current(conf, ip, current, inventory):
     ui.title('TERBITKAN SERTIFIKAT LET\'S ENCRYPT UNTUK {0}'.format(current))
-    email = inventory.get('admin_email') or ''
-    if not EMAIL_RE.match(email) or email.endswith(('@domain.com', '@example.com')):
-        email = ui.ask('Email untuk Let\'s Encrypt: ').strip()
-        if not EMAIL_RE.match(email):
-            ui.fail('email tidak valid.')
+    email = ui.as_email(inventory.get('admin_email') or '')
+    if not email:
+        email = ui.ask_text('Email untuk Let\'s Encrypt (0 = batal): ', ui.as_email, 'admin@domainanda.com')
+        if not email:
+            ui.write('Dibatalkan.')
             return
     if not ui.ask_yes('Ganti sertifikat selfsigned {0} dengan Let\'s Encrypt? [y/N]: '.format(current)):
         ui.write('Dibatalkan.')
