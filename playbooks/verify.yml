@@ -65,4 +65,4 @@
       ansible.builtin.set_fact:
         '{{ item.key }}': '{{ item.value }}'
       loop: '{{ gateway_safe_defaults | dict2items }}'
-      when: item.key not in vars
+      when: item.key not in hostvars[inventory_hostname]

@@ -42,7 +42,7 @@
       - -subj
       - '/CN={{ certs_domain }}'
       - -addext
-      - 'subjectAltName=DNS:{{ certs_domain }}'
+      - "subjectAltName={{ 'IP:' if certs_domain is match('^[0-9]{1,3}([.][0-9]{1,3}){3}$') else 'DNS:' }}{{ certs_domain }}"
       - -keyout
       - '{{ certs_dir }}/{{ certs_domain }}.key'
       - -out

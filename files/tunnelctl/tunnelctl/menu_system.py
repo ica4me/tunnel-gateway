@@ -1,6 +1,8 @@
 """System menu: every view is a table, every change shows the current value first."""
+import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 from pathlib import Path
@@ -88,117 +90,238 @@ def system_info(settings_override=None, backend=None):
 
 DOMAIN_HELPER = '/usr/local/sbin/tunnel-domain-change'
 DOMAIN_RE = re.compile(r'^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$')
 
 
-def _domain_rows(title, name, ip):
-    dns = info.dns_lookup(name)
-    match = bool(ip) and ip in dns
-    return [('#', title),
-            ('Domain', name),
-            ('IP publik server', ip or '-'),
-            ('DNS A record', '{0} ({1})'.format(', '.join(dns) or 'tidak ditemukan', 'cocok' if match else 'TIDAK cocok'),
-             ui.GREEN if match else ui.RED)], match
+def _inventory_state():
+    """Current inventory values via the helper (domain may be empty = IP mode)."""
+    code, out, _ = ui.sh([DOMAIN_HELPER, '--show'], timeout=15)
+    try:
+        return json.loads(out) if code == 0 else {}
+    except ValueError:
+        return {}
 
 
-def domain(settings_override=None, backend=None):
-    conf = ui.settings(settings_override)
-    current = conf.get('domain', '-')
-    ip = ui.server_ip(allow_network=True)
+def _run_helper(args):
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        return subprocess.call([DOMAIN_HELPER] + args)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def _domain_cert_rows(conf, ip):
+    domain = conf.get('domain', '-')
+    ip_mode = ui.is_ip(domain)
     cert = info.cert_info(info.cert_path(conf))
-    rows, _ = _domain_rows('DOMAIN SAAT INI', current, ip)
-    rows += [('Sertifikat untuk', cert.get('san') or cert.get('cn') or '-'),
-             ('Sertifikat sampai', cert['end'].astimezone().strftime('%Y-%m-%d') if cert.get('end') else '-')]
-    ui.title('GANTI DOMAIN')
-    ui.write_lines(ui.box(rows))
-    if not os.path.exists(DOMAIN_HELPER):
-        ui.write('')
-        ui.write('Server ini dikelola dari controller terpisah. Jalankan di controller (folder repo):')
-        for line in ('sed -i "s/^\\( *tunnel_domain: *\\).*/\\1DOMAIN_BARU/" INVENTORY/hosts.yml',
-                     '.venv/bin/ansible-playbook -i INVENTORY/hosts.yml playbooks/prepare-server.yml',
-                     '.venv/bin/ansible-playbook -i INVENTORY/hosts.yml playbooks/site.yml',
-                     '.venv/bin/ansible-playbook -i INVENTORY/hosts.yml playbooks/commit-server.yml'):
-            ui.write('  ' + line)
-        return
-    ui.write('')
-    ui.write('Langkah sebelum ganti domain:')
-    ui.write('  1. Buat A record domain baru -> {0} di Cloudflare (DNS only / awan abu-abu).'.format(ip))
-    ui.write('  2. Tunggu sampai DNS aktif (biasanya 1-5 menit), lalu isi domain baru di bawah.')
-    new = ui.ask('\nDomain baru (kosong = batal): ').lower().rstrip('.')
+    rows = [('#', 'DOMAIN & SERTIFIKAT SAAT INI'),
+            ('Domain', 'BELUM DIATUR (memakai IP {0})'.format(domain) if ip_mode else domain,
+             ui.YELLOW if ip_mode else None),
+            ('IP publik server', ip or '-')]
+    if not ip_mode:
+        dns = info.dns_lookup(domain)
+        match = bool(ip) and ip in dns
+        rows.append(('DNS A record', '{0} ({1})'.format(', '.join(dns) or 'tidak ditemukan', 'cocok' if match else 'TIDAK cocok'),
+                     ui.GREEN if match else ui.RED))
+    rows += info.cert_rows(cert, conf)[1:]
+    state = ui.unit_states(['tunnel-acme-renew.timer'])['tunnel-acme-renew.timer']
+    if state.get('LoadState') not in ('not-found', 'unknown'):
+        rows += [('Renew otomatis', '{0}; berikutnya {1}'.format(ui.state_label(state)[0],
+                                                              ui.short_ts(state.get('NextElapseUSecRealtime'))))]
+    return rows, ip_mode
+
+
+def _set_domain(conf, ip, current, ip_mode, inventory):
+    ui.title('ATUR / GANTI DOMAIN + SERTIFIKAT LET\'S ENCRYPT')
+    ui.write('Langkah sebelum mengisi domain:')
+    ui.write('  1. Buat A record domain -> {0} di Cloudflare (DNS only / awan abu-abu).'.format(ip))
+    ui.write('  2. Tunggu DNS aktif (biasanya 1-5 menit).')
+    new = ui.ask('\nDomain {0}(kosong = batal): '.format('baru ' if not ip_mode else '')).lower().rstrip('.')
     if not new:
         ui.write('Dibatalkan.')
         return
     if not DOMAIN_RE.match(new):
         ui.fail('format domain tidak valid: {0}'.format(new))
         return
-    if new == current:
-        ui.write('Domain baru sama dengan domain saat ini; tidak ada yang diubah.')
-        return
-    ui.clear()
-    ui.title('GANTI DOMAIN: {0} -> {1}'.format(current, new))
-    rows, match = _domain_rows('PEMERIKSAAN DOMAIN BARU', new, ip)
-    ui.write_lines(ui.box(rows))
-    args = [DOMAIN_HELPER, new, '--yes']
+    email = inventory.get('admin_email') or ''
+    if not EMAIL_RE.match(email) or email.endswith(('@domain.com', '@example.com')):
+        email = ui.ask('Email untuk Let\'s Encrypt (pemberitahuan masa berlaku): ').strip()
+        if not EMAIL_RE.match(email):
+            ui.fail('email tidak valid.')
+            return
+    else:
+        ui.write('Email Let\'s Encrypt: {0}'.format(email))
+    dns = info.dns_lookup(new)
+    match = bool(ip) and ip in dns
+    ui.write_lines(ui.box([('#', 'PEMERIKSAAN DOMAIN'), ('Domain', new), ('IP server', ip or '-'),
+                           ('DNS A record', '{0} ({1})'.format(', '.join(dns) or 'tidak ditemukan', 'cocok' if match else 'TIDAK cocok'),
+                            ui.GREEN if match else ui.RED)]))
+    args = [new, '--cert-mode', 'http01', '--email', email, '--yes']
     if not match:
-        ui.write(ui.paint('DNS domain baru belum mengarah ke server ini.', ui.RED))
-        ui.note('Untuk mode http01, Let\'s Encrypt WAJIB bisa menjangkau domain baru di port 80. '
-                'Perbaiki DNS lalu ulangi. Lewati pemeriksaan hanya jika memakai Cloudflare proxied atau cert_mode dns_cloudflare.')
+        ui.write(ui.paint('DNS domain belum mengarah ke server ini.', ui.RED))
+        ui.note('Let\'s Encrypt (http01) WAJIB bisa menjangkau domain di port 80. Perbaiki DNS lalu ulangi. '
+                'Lewati pemeriksaan hanya jika memakai Cloudflare proxied.')
         if not ui.ask_yes('Tetap lanjut tanpa pemeriksaan DNS/HTTP? [y/N]: '):
             ui.write('Dibatalkan.')
             return
         args.append('--skip-dns-check')
-    ui.write('')
-    ui.write('Yang akan terjadi:')
-    for step in ('tunnel_domain di inventory diganti (cadangan otomatis dibuat);',
-                 'prepare -> site -> commit dijalankan; sertifikat baru diterbitkan;',
-                 'port 443 sempat terputus selama penerbitan sertifikat (beberapa detik - menit);',
-                 'jika gagal, domain lama otomatis dipulihkan;',
-                 'link semua akun berubah ke domain baru (perlu dibagikan ulang).'):
+    ui.write('\nYang akan terjadi:')
+    for step in ('domain & email disimpan ke inventory (cadangan otomatis dibuat);',
+                 'prepare -> site -> commit dijalankan; sertifikat Let\'s Encrypt diterbitkan;',
+                 'port 443 sempat terputus beberapa saat selama penerbitan sertifikat;',
+                 'jika gagal, setelan lama dipulihkan otomatis;',
+                 'link semua akun berubah ke domain ini (bagikan ulang ke pelanggan).'):
         ui.write('  - ' + step)
-    ui.note('Perkiraan 3-10 menit. Jangan tutup terminal; sebaiknya jalankan menu ini di dalam tmux.')
-    if not ui.ask_yes('Mulai ganti domain ke {0}? [y/N]: '.format(new)):
+    ui.note('Perkiraan 3-10 menit. Jangan tutup terminal; sebaiknya jalankan menu di dalam tmux.')
+    if not ui.ask_yes('Mulai? [y/N]: '):
         ui.write('Dibatalkan.')
         return
-    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
-    try:
-        code = subprocess.call(args)
-    finally:
-        signal.signal(signal.SIGINT, previous)
+    code = _run_helper(args)
     ui.write('')
-    conf = ui.settings(settings_override)
-    rows, _ = _domain_rows('DOMAIN SETELAH PROSES', conf.get('domain', '-'), ip)
-    cert = info.cert_info(info.cert_path(conf))
-    rows.append(('Sertifikat sampai', cert['end'].astimezone().strftime('%Y-%m-%d') if cert.get('end') else '-'))
+    rows, _ = _domain_cert_rows(ui.settings(), ip)
     ui.write_lines(ui.box(rows))
-    (ui.ok if code == 0 else ui.fail)('domain diganti.' if code == 0 else 'ganti domain tidak selesai (lihat keluaran di atas).')
+    (ui.ok if code == 0 else ui.fail)('domain & sertifikat diperbarui.' if code == 0 else 'proses tidak selesai (lihat keluaran di atas).')
 
 
-def certificate(settings_override=None, backend=None):
-    conf = ui.settings(settings_override)
-    def show():
-        rows = info.cert_rows(info.cert_info(info.cert_path(conf)), conf)
-        state = ui.unit_states(['tunnel-acme-renew.timer'])['tunnel-acme-renew.timer']
-        if state.get('LoadState') != 'not-found':
-            rows += [('#', 'PERPANJANGAN OTOMATIS'),
-                     ('Timer', ui.state_label(state)[0], ui.state_label(state)[1]),
-                     ('Cek terakhir', ui.short_ts(state.get('LastTriggerUSec'))),
-                     ('Cek berikutnya', ui.short_ts(state.get('NextElapseUSecRealtime')))]
-        ui.write_lines(ui.box(rows))
-        return state
-    ui.title('SERTIFIKAT TLS')
-    state = show()
-    if conf.get('cert_mode') == 'selfsigned' or state.get('LoadState') == 'not-found':
-        ui.note('Mode selfsigned: tidak ada perpanjangan otomatis. Ganti cert_mode di inventory untuk sertifikat publik.')
+def _issue_for_current(conf, ip, current, inventory):
+    ui.title('TERBITKAN SERTIFIKAT LET\'S ENCRYPT UNTUK {0}'.format(current))
+    email = inventory.get('admin_email') or ''
+    if not EMAIL_RE.match(email) or email.endswith(('@domain.com', '@example.com')):
+        email = ui.ask('Email untuk Let\'s Encrypt: ').strip()
+        if not EMAIL_RE.match(email):
+            ui.fail('email tidak valid.')
+            return
+    if not ui.ask_yes('Ganti sertifikat selfsigned {0} dengan Let\'s Encrypt? [y/N]: '.format(current)):
+        ui.write('Dibatalkan.')
         return
+    code = _run_helper([current, '--cert-mode', 'http01', '--email', email, '--yes'])
+    (ui.ok if code == 0 else ui.fail)('sertifikat diterbitkan.' if code == 0 else 'penerbitan gagal (lihat keluaran di atas).')
+
+
+def _renew_now():
+    ui.title('PERPANJANG SERTIFIKAT SEKARANG')
     ui.note('acme.sh hanya memperbarui jika sertifikat tinggal <= 30 hari; di luar itu pengecekan dilewati.')
     if not ui.ask_yes('Jalankan pengecekan perpanjangan sekarang? [y/N]: '):
         return
-    ui.write('Menjalankan tunnel-acme-renew.service ...')
     code, _, _ = ui.sh(['systemctl', 'start', 'tunnel-acme-renew.service'], timeout=300)
     _, log, _ = ui.sh(['journalctl', '-u', 'tunnel-acme-renew.service', '-n', '12', '--no-pager', '-o', 'cat'])
     ui.write_lines(['  ' + line for line in log.splitlines()])
     (ui.ok if code == 0 else ui.fail)('pengecekan selesai' if code == 0 else 'pengecekan gagal (lihat log di atas)')
-    ui.write('')
-    show()
+
+
+def domain_cert(settings_override=None, backend=None):
+    while True:
+        ui.clear()
+        conf = ui.settings(settings_override)
+        ip = ui.server_ip(allow_network=True)
+        ui.title('DOMAIN & SERTIFIKAT TLS')
+        rows, ip_mode = _domain_cert_rows(conf, ip)
+        ui.write_lines(ui.box(rows))
+        helper = os.path.exists(DOMAIN_HELPER)
+        if not helper:
+            ui.write('')
+            ui.write('Server ini dikelola dari controller terpisah. Ubah tunnel_domain/cert_mode/admin_email')
+            ui.write('di inventory controller, lalu jalankan prepare-server.yml, site.yml, commit-server.yml.')
+            return
+        inventory = _inventory_state()
+        current = conf.get('domain', '')
+        selfsigned_domain = not ip_mode and conf.get('cert_mode') == 'selfsigned'
+        acme = not ip_mode and conf.get('cert_mode') in ('http01', 'dns_cloudflare')
+        items = [('1', 'Atur domain + sertifikat Let\'s Encrypt' if ip_mode else 'Ganti domain + sertifikat Let\'s Encrypt')]
+        if selfsigned_domain:
+            items.append(('2', 'Terbitkan sertifikat Let\'s Encrypt untuk domain saat ini'))
+        if acme:
+            items.append(('3', 'Perpanjang sertifikat sekarang (cek renew)'))
+        for key, label in items:
+            ui.write(' {0}. {1}'.format(key, label))
+        ui.write(' 0. Kembali')
+        choice = ui.ask('Pilih: ')
+        if choice in ('', '0', 'q', 'Q'):
+            return
+        ui.clear()
+        if choice == '1':
+            _set_domain(conf, ip, current, ip_mode, inventory)
+        elif choice == '2' and selfsigned_domain:
+            _issue_for_current(conf, ip, current, inventory)
+        elif choice == '3' and acme:
+            _renew_now()
+        else:
+            ui.write('Pilihan tidak valid.')
+        ui.pause()
+
+
+def _mbps(section):
+    return '{0:.2f} Mbps'.format(float((section or {}).get('bandwidth', 0)) * 8 / 1e6)
+
+
+def speedtest(settings_override=None, backend=None):
+    ui.title('SPEEDTEST (OOKLA)')
+    binary = shutil.which('speedtest')
+    code, out, _ = ui.sh([binary, '--version'], timeout=10) if binary else (1, '', '')
+    if not binary or 'Ookla' not in out:
+        ui.fail('Speedtest Ookla belum terpasang.')
+        ui.note('Pasang dengan: .venv/bin/ansible-playbook playbooks/prepare-speedtest.yml (dari folder repo).')
+        return
+    base = [binary, '--accept-license', '--accept-gdpr']
+    ui.write(' 1. Server otomatis (terdekat)')
+    ui.write(' 2. Pilih dari daftar server terdekat')
+    choice = ui.ask('Pilih [1]: ') or '1'
+    server_args = []
+    if choice == '2':
+        ui.write('Mengambil daftar server...')
+        code, out, err = ui.sh(base + ['--servers', '--format=json'], timeout=60)
+        try:
+            servers = json.loads(out).get('servers', [])
+        except ValueError:
+            servers = []
+        if not servers:
+            ui.fail('daftar server tidak bisa diambil.')
+            return
+        rows = [[str(i), str(s.get('id')), s.get('name', '-'), s.get('location', '-'), s.get('country', '-')]
+                for i, s in enumerate(servers[:15], 1)]
+        ui.write_lines(ui.table(['No', 'ID', 'Penyedia', 'Lokasi', 'Negara'], rows, [3, 7, 26, 20, 14], right=(0,)))
+        pick = ui.ask_int('Pilih NOMOR (kosong = batal): ')
+        if not pick or pick > len(rows):
+            ui.write('Dibatalkan.')
+            return
+        server_args = ['--server-id', rows[pick - 1][1]]
+    ui.note('Pengukuran memakai beberapa ratus MB kuota server dan bisa sedikit memperlambat klien selama ~30 detik.')
+    ui.write('Mengukur... (20-60 detik)')
+    code, out, err = ui.sh(base + ['--format=json', '--progress=no'] + server_args, timeout=180)
+    try:
+        result = json.loads(out.strip().splitlines()[-1]) if out.strip() else {}
+    except (ValueError, IndexError):
+        result = {}
+    if code != 0 or result.get('type') != 'result':
+        ui.fail('speedtest gagal.')
+        ui.write((err or out).strip()[-600:])
+        return
+    server = result.get('server', {})
+    ping = result.get('ping', {})
+    loss = result.get('packetLoss')
+    rows = [('#', 'HASIL SPEEDTEST'),
+            ('Server', '{0} - {1}, {2} (id {3})'.format(server.get('name', '-'), server.get('location', '-'),
+                                                      server.get('country', '-'), server.get('id', '-'))),
+            ('ISP', result.get('isp', '-')),
+            ('IP publik', (result.get('interface') or {}).get('externalIp', '-')),
+            ('Ping', '{0:.1f} ms (jitter {1:.1f} ms)'.format(float(ping.get('latency', 0)), float(ping.get('jitter', 0)))),
+            ('Download', _mbps(result.get('download')), ui.GREEN),
+            ('Upload', _mbps(result.get('upload')), ui.GREEN),
+            ('Packet loss', '{0:.1f}%'.format(float(loss)) if loss is not None else '-'),
+            ('Data terpakai', '{0} unduh / {1} unggah'.format(ui.size((result.get('download') or {}).get('bytes')),
+                                                             ui.size((result.get('upload') or {}).get('bytes')))),
+            ('Link hasil', (result.get('result') or {}).get('url', '-'))]
+    ui.write_lines(ui.box(rows))
+    try:
+        from . import menu_telegram as tg
+        data = tg.load(settings_override)
+        if tg.enabled(data) and ui.ask_yes('Kirim hasil ke Telegram? [y/N]: '):
+            text = '\U0001F4F6 <b>Speedtest server</b>\n' + '\n'.join(
+                '<b>{0}</b> : {1}'.format(tg._e(r[0]), tg._e(r[1])) for r in rows if r[0] != '#') + tg._footer()
+            ok, reason = tg.send(data, text)
+            (ui.ok if ok else ui.fail)('terkirim ke Telegram.' if ok else 'gagal kirim: {0}'.format(reason))
+    except Exception as exc:
+        ui.write(ui.paint('Telegram dilewati ({0}).'.format(type(exc).__name__), ui.YELLOW))
 
 
 def banner(settings_override=None, backend=None):
@@ -399,16 +522,16 @@ def regenerate(settings_override=None, backend=None):
 ITEMS = [('1', 'Status service & timer', status),
          ('2', 'Restart service', restart),
          ('3', 'Info sistem (CPU/RAM/disk)', system_info),
-         ('4', 'Ganti domain', domain),
-         ('5', 'Sertifikat TLS', certificate),
-         ('6', 'Banner SSH', banner),
-         ('7', 'Bandwidth harian', lambda s, b: bandwidth('daily', s, b)),
-         ('8', 'Bandwidth bulanan', lambda s, b: bandwidth('monthly', s, b)),
-         ('9', 'Log service', logs),
-         ('10', 'Auto-reboot', autoreboot),
-         ('11', 'Bersihkan log', clean_logs),
-         ('12', 'Doctor (cek kesehatan)', doctor),
-         ('13', 'Regenerate config Xray', regenerate)]
+         ('4', 'Domain & Sertifikat TLS', domain_cert),
+         ('5', 'Banner SSH', banner),
+         ('6', 'Bandwidth harian', lambda s, b: bandwidth('daily', s, b)),
+         ('7', 'Bandwidth bulanan', lambda s, b: bandwidth('monthly', s, b)),
+         ('8', 'Log service', logs),
+         ('9', 'Auto-reboot', autoreboot),
+         ('10', 'Bersihkan log', clean_logs),
+         ('11', 'Doctor (cek kesehatan)', doctor),
+         ('12', 'Regenerate config Xray', regenerate),
+         ('13', 'Speedtest (Ookla)', speedtest)]
 
 
 def system_menu(settings_override=None, backend=None):

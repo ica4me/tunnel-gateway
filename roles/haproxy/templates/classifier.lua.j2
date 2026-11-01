@@ -1,6 +1,9 @@
 -- Managed by Ansible. Read-only classification.
 core.register_fetches("tunnel_route", function(txn)
-    local data = txn.req:dup() or ""
+    -- HAProxy >= 2.5: Channel:data(); 2.4 (Ubuntu 22.04): Channel:dup() fallback.
+    local ok, data = pcall(function() return txn.req:data(0) end)
+    if not ok or data == nil then data = txn.req:dup() end
+    data = data or ""
     if data:sub(1, 4) == "SSH-" then return "ssh" end
     local method, path = data:match("^([A-Z]+) ([^ ]+) HTTP/1%.[01]\r\n")
     if not method then return "ws" end

@@ -1,167 +1,103 @@
 ---
-- name: Audit optional Ookla Speedtest
+# Optional Ookla Speedtest CLI. Ookla's packagecloud repository only publishes up to Ubuntu jammy,
+# so every supported OS uses the ubuntu/jammy repository (the package is a static binary).
+# Never fails the deployment: on any error the repository file is removed so apt keeps working.
+- name: Optional Ookla Speedtest CLI
   hosts: all
   become: true
-  gather_facts: true
+  gather_facts: false
 
   vars:
-    speedtest_repo_map:
-      Ubuntu:
-        '22.04': jammy
-      Debian:
-        '12': bookworm
-        '13': trixie
+    speedtest_key_url: https://packagecloud.io/ookla/speedtest-cli/gpgkey
+    speedtest_key_fingerprint: C525F88FCF3A7E56CE2CF59131EB3981E723ACAA
+    speedtest_key_path: /etc/apt/keyrings/ookla-speedtest.asc
+    speedtest_list_path: /etc/apt/sources.list.d/ookla-speedtest.list
+    speedtest_repo_line: >-
+      deb [signed-by={{ speedtest_key_path }}] https://packagecloud.io/ookla/speedtest-cli/ubuntu/ jammy main
 
   tasks:
-    - name: Require supported operating system
-      ansible.builtin.assert:
-        that:
-          - >-
-            (ansible_facts.distribution == 'Debian'
-             and ansible_facts.distribution_major_version in ['12', '13'])
-            or
-            (ansible_facts.distribution == 'Ubuntu'
-             and ansible_facts.distribution_version in
-             ['22.04', '24.04', '26.04'])
-        fail_msg: "OS tidak didukung."
+    - name: Skip when Speedtest is disabled
+      ansible.builtin.meta: end_host
+      when: not (speedtest_enabled | default(true) | bool)
 
-    - name: Normalize OS version for Ookla repository
-      ansible.builtin.set_fact:
-        speedtest_os_version: >-
-          {{
-            ansible_facts.distribution_major_version
-            if ansible_facts.distribution == 'Debian'
-            else ansible_facts.distribution_version
-          }}
+    - name: Install and verify Ookla repository and package
+      block:
+        - name: Create APT keyring directory
+          ansible.builtin.file:
+            path: /etc/apt/keyrings
+            state: directory
+            owner: root
+            group: root
+            mode: '0755'
 
-    - name: Determine verified Ookla repository
-      ansible.builtin.set_fact:
-        speedtest_repo_codename: >-
-          {{
-            speedtest_repo_map
-            .get(ansible_facts.distribution, {})
-            .get(speedtest_os_version, '')
-          }}
+        - name: Download Ookla repository signing key
+          ansible.builtin.get_url:
+            url: '{{ speedtest_key_url }}'
+            dest: '{{ speedtest_key_path }}'
+            owner: root
+            group: root
+            mode: '0644'
+            timeout: 20
 
-    - name: Show selected Ookla repository
-      ansible.builtin.debug:
-        msg: >-
-          {{
-            ansible_facts.distribution | lower ~
-            ' ' ~ speedtest_repo_codename
-            if speedtest_repo_codename | length > 0
-            else 'Repositori Ookla belum diverifikasi untuk OS ini.'
-          }}
+        - name: Inspect downloaded signing key
+          ansible.builtin.command:
+            argv: [gpg, --batch, --no-default-keyring, --show-keys, --with-colons, '{{ speedtest_key_path }}']
+          register: speedtest_key_info
+          changed_when: false
 
-    - name: Require verified Ookla repository before approval
-      ansible.builtin.assert:
-        that:
-          - speedtest_repo_codename | length > 0
-        fail_msg: >-
-          Repositori Ookla belum diverifikasi untuk OS ini.
-          Konfigurasi repositori dibatalkan.
-      when: speedtest_repo_approved | default(false) | bool
+        - name: Require the known Ookla packagecloud fingerprint
+          ansible.builtin.assert:
+            that:
+              - speedtest_key_fingerprint in speedtest_key_info.stdout
+            fail_msg: Fingerprint kunci Ookla tidak cocok; repositori tidak dipasang.
+            quiet: true
 
-    - name: Create Ookla APT keyring directory
-      ansible.builtin.file:
-        path: /etc/apt/keyrings
-        state: directory
-        owner: root
-        group: root
-        mode: '0755'
-      when: speedtest_repo_approved | default(false) | bool
+        - name: Configure Ookla repository (forced ubuntu/jammy)
+          ansible.builtin.copy:
+            dest: '{{ speedtest_list_path }}'
+            content: "# Managed by Ansible (tunnel-gateway): Ookla Speedtest CLI\n{{ speedtest_repo_line }}\n"
+            owner: root
+            group: root
+            mode: '0644'
 
-    - name: Download Ookla repository signing key
-      ansible.builtin.get_url:
-        url: https://packagecloud.io/ookla/speedtest-cli/gpgkey
-        dest: /etc/apt/keyrings/ookla-speedtest.asc
-        owner: root
-        group: root
-        mode: '0644'
-        validate_certs: true
-      when: speedtest_repo_approved | default(false) | bool
+        - name: Refresh APT lists
+          ansible.builtin.command:
+            argv: [apt-get, update, -q]
+          changed_when: false
 
-    - name: Inspect downloaded Ookla signing key
-      ansible.builtin.command:
-        argv:
-          - gpg
-          - --batch
-          - --no-default-keyring
-          - --show-keys
-          - --with-colons
-          - /etc/apt/keyrings/ookla-speedtest.asc
-      register: speedtest_key_info
-      changed_when: false
-      when: speedtest_repo_approved | default(false) | bool
+        - name: Require the speedtest package from the Ookla repository
+          ansible.builtin.command:
+            argv: [apt-cache, policy, speedtest]
+          register: speedtest_candidate
+          changed_when: false
+          failed_when: >-
+            'packagecloud.io/ookla/speedtest-cli' not in speedtest_candidate.stdout
+            or 'Candidate: (none)' in speedtest_candidate.stdout
 
-    - name: Require expected Ookla signing key fingerprints
-      ansible.builtin.assert:
-        that:
-          - "'C525F88FCF3A7E56CE2CF59131EB3981E723ACAA' in speedtest_key_info.stdout"
-          - "'C33793D1EB26151AE4E322278E61C2AB9A6D1557' in speedtest_key_info.stdout"
-        fail_msg: >-
-          Fingerprint GPG Ookla tidak cocok.
-          Konfigurasi repositori dihentikan.
-        quiet: true
-      when: speedtest_repo_approved | default(false) | bool
+        - name: Install Ookla Speedtest CLI
+          ansible.builtin.apt:
+            name: speedtest
+            state: present
 
-    - name: Configure verified Ookla APT repository
-      ansible.builtin.copy:
-        dest: /etc/apt/sources.list.d/ookla-speedtest.list
-        content: >-
-          deb [signed-by=/etc/apt/keyrings/ookla-speedtest.asc]
-          https://packagecloud.io/ookla/speedtest-cli/{{ ansible_facts.distribution | lower }}
-          {{ speedtest_repo_codename }} main
-        owner: root
-        group: root
-        mode: '0644'
-      when: speedtest_repo_approved | default(false) | bool
+        - name: Report Speedtest installed
+          ansible.builtin.debug:
+            msg: Speedtest Ookla terpasang (Menu Sistem > 13).
 
-    - name: Refresh APT cache after Ookla repository configuration
-      ansible.builtin.apt:
-        update_cache: true
-      when: speedtest_repo_approved | default(false) | bool
+      rescue:
+        - name: Remove Ookla repository so APT stays healthy
+          ansible.builtin.file:
+            path: '{{ speedtest_list_path }}'
+            state: absent
 
-    - name: Inspect Ookla Speedtest package candidate
-      ansible.builtin.command:
-        argv:
-          - apt-cache
-          - policy
-          - speedtest
-      register: speedtest_candidate
-      changed_when: false
-      failed_when: false
+        - name: Refresh APT lists without the Ookla repository
+          ansible.builtin.command:
+            argv: [apt-get, update, -q]
+          changed_when: false
+          failed_when: false
 
-    - name: Show Speedtest repository status
-      ansible.builtin.debug:
-        msg: >-
-          {{
-            'Paket Ookla tersedia di APT.'
-            if 'Candidate:' in speedtest_candidate.stdout
-            and 'Candidate: (none)' not in speedtest_candidate.stdout
-            else 'Repositori Ookla belum menyediakan kandidat paket.'
-          }}
-
-    - name: Validate explicit Speedtest installation approval
-      ansible.builtin.assert:
-        that:
-          - speedtest_repo_approved | default(false) | bool
-          - speedtest_repo_codename | length > 0
-          - "'Candidate:' in speedtest_candidate.stdout"
-          - "'Candidate: (none)' not in speedtest_candidate.stdout"
-          - "'packagecloud.io/ookla/speedtest-cli' in speedtest_candidate.stdout"
-        fail_msg: >-
-          Instalasi Speedtest ditolak.
-          Repositori Ookla harus disetujui dan kandidat paket
-          harus berasal dari repositori Ookla.
-        quiet: true
-      when: speedtest_install_approved | default(false) | bool
-
-    - name: Install approved Ookla Speedtest CLI
-      ansible.builtin.apt:
-        name: speedtest
-        state: present
-        fail_on_autoremove: true
-        allow_downgrade: false
-        policy_rc_d: 101
-      when: speedtest_install_approved | default(false) | bool
+        - name: Report Speedtest skipped (deployment continues)
+          ansible.builtin.debug:
+            msg: >-
+              Speedtest dilewati: {{ ansible_failed_result.msg | default('repositori Ookla tidak tersedia') }}.
+              Instalasi gateway tetap berjalan; coba lagi nanti dengan
+              ansible-playbook playbooks/prepare-speedtest.yml

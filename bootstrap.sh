@@ -1,129 +1,109 @@
 #!/usr/bin/env bash
+# Tunnel Gateway installer - same command on Debian 12/13 and Ubuntu 22.04/24.04/26.04.
+#   bash bootstrap.sh [INVENTORY] [--setup-only] [ansible-playbook options...]
+# Steps: controller Python (uv when the OS Python is < 3.12) -> .venv + pinned ansible-core
+#        -> prepare-packages -> prepare-speedtest (optional) -> prepare-server -> site -> commit-server
+# Env:   PACKAGE_MODE=pinned|latest-compatible   SPEEDTEST=0 to skip Speedtest
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ ! -d "$ROOT_DIR/playbooks" ]]; then ROOT_DIR="$(dirname "$ROOT_DIR")"; fi
 cd "$ROOT_DIR"
 
-usage() {
-  printf 'Usage: %s INVENTORY [ansible-playbook options...]\n' "$0" >&2
-  printf '       %s --local [ansible-playbook options...]\n' "$0" >&2
-}
+say() { printf '%s\n' "$*"; }
+die() { printf 'GAGAL: %s\n' "$*" >&2; exit 1; }
 
-check_supported_local_os() {
+INV="inventories/new-server/hosts.yml"
+SETUP_ONLY=0
+if [[ $# -ge 1 && "$1" != -* ]]; then INV="$1"; shift; fi
+if [[ "${1:-}" == "--setup-only" ]]; then SETUP_ONLY=1; shift; fi
+[[ -f "$INV" ]] || die "inventory tidak ditemukan: $INV"
+
+LOCAL=0
+grep -Eq '^[[:space:]]*ansible_connection:[[:space:]]*local' "$INV" && LOCAL=1
+if [[ $LOCAL == 1 ]]; then
+  [[ $EUID -eq 0 ]] || die "mode lokal harus dijalankan sebagai root."
   . /etc/os-release
   case "${ID:-}:${VERSION_ID:-}" in
     debian:12|debian:13|ubuntu:22.04|ubuntu:24.04|ubuntu:26.04) ;;
-    *)
-      printf 'OS local bootstrap tidak didukung: %s %s\n' "${ID:-unknown}" "${VERSION_ID:-unknown}" >&2
-      exit 2
-      ;;
+    *) die "OS tidak didukung: ${PRETTY_NAME:-unknown}. Didukung: Debian 12/13, Ubuntu 22.04/24.04/26.04." ;;
   esac
-}
-
-collect_local_prompts() {
-  local domain="${TUNNEL_DOMAIN:-}" email="${ADMIN_EMAIL:-}" cert_mode="${CERT_MODE:-http01}"
-  [[ -n "$domain" ]] || read -r -p 'Domain tunnel (contoh: gw.example.com): ' domain
-  [[ -n "$email" ]] || read -r -p 'Email admin ACME: ' email
-  case "$cert_mode" in
-    dns_cloudflare|http01|selfsigned) ;;
-    *)
-      printf 'CERT_MODE tidak valid: %s\n' "$cert_mode" >&2
-      exit 2
-      ;;
-  esac
-  [[ -n "$domain" && -n "$email" ]] || { printf 'Domain dan email wajib diisi.\n' >&2; exit 2; }
-  BOOTSTRAP_EXTRA_VARS=(
-    "tunnel_domain=$domain"
-    "admin_email=$email"
-    "cert_mode=$cert_mode"
-  )
-}
-
-if [[ "${1:-}" == "--local" ]]; then
-  shift
-  check_supported_local_os
-  collect_local_prompts
-  INV='localhost,'
-  CONN_ARGS=(-c local -e "${BOOTSTRAP_EXTRA_VARS[0]}" -e "${BOOTSTRAP_EXTRA_VARS[1]}" -e "${BOOTSTRAP_EXTRA_VARS[2]}")
-elif [[ $# -ge 1 && -f "$1" ]]; then
-  INV="$1"
-  shift
-  CONN_ARGS=()
-else
-  usage
-  exit 2
 fi
 
-# Ansible A2 controller bootstrap
-ANSIBLE_VENV=".venv-a2"
+# 1. Python venv support (fresh cloud images often lack python3-venv).
+if ! python3 -c 'import ensurepip, venv' >/dev/null 2>&1; then
+  if [[ $EUID -eq 0 ]] && command -v apt-get >/dev/null; then
+    say ">>> Memasang python3-venv"
+    apt-get update -q >/dev/null || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q python3-venv python3-pip >/dev/null
+  else
+    die "python3-venv belum terpasang. Jalankan: sudo apt-get install -y python3-venv python3-pip"
+  fi
+fi
+
+# 2. uv (pinned) provides Python 3.12 when the OS Python is older (Ubuntu 22.04 = 3.10, Debian 12 = 3.11).
 UV_VENV=".venv-bootstrap"
-
-# Install pinned uv into an isolated environment if missing
 if [[ ! -x "$UV_VENV/bin/uv" ]]; then
+  say ">>> Menyiapkan uv"
   python3 -m venv "$UV_VENV"
-  "$UV_VENV/bin/python" -m pip install 'uv==0.13.6'
+  "$UV_VENV/bin/python" -m pip install -q 'uv==0.13.6'
 fi
-
-UV_BIN="$UV_VENV/bin/uv"
-
-# Prefer system Python when supported by Ansible 2.21
-if [[ -n "${BOOTSTRAP_PYTHON:-}" ]]; then
-  CONTROLLER_PYTHON="$BOOTSTRAP_PYTHON"
-elif python3 -c \
-  'import sys; assert (3,12) <= sys.version_info[:2] <= (3,14)' \
-  2>/dev/null; then
+UV="$UV_VENV/bin/uv"
+supported='import sys; sys.exit(0 if (3,12) <= sys.version_info[:2] <= (3,14) else 1)'
+if python3 -c "$supported" 2>/dev/null; then
   CONTROLLER_PYTHON="$(command -v python3)"
 else
-  "$UV_BIN" python install 3.12
-  CONTROLLER_PYTHON="$("$UV_BIN" python find 3.12)"
+  say ">>> Python sistem $(python3 -V 2>&1 | cut -d' ' -f2) < 3.12: memasang Python 3.12 terpisah untuk Ansible"
+  "$UV" python install 3.12 >/dev/null
+  CONTROLLER_PYTHON="$("$UV" python find --python-preference only-managed --no-project 3.12)"
 fi
 
-# Validate selected interpreter
-"$CONTROLLER_PYTHON" -c \
-  'import sys; assert (3,12) <= sys.version_info[:2] <= (3,14)'
-
-# Create A2 environment without replacing an existing one
-if [[ ! -x "$ANSIBLE_VENV/bin/python" ]]; then
-  "$UV_BIN" venv \
-    --python "$CONTROLLER_PYTHON" \
-    "$ANSIBLE_VENV"
+# 3. One Ansible venv (.venv). An older .venv on Python < 3.12 is kept aside, not deleted.
+if [[ -x .venv/bin/python ]] && ! .venv/bin/python -c "$supported" 2>/dev/null; then
+  old=".venv.old-$(date +%Y%m%d-%H%M%S)"
+  mv .venv "$old"
+  say ">>> .venv lama (Python < 3.12) dipindahkan ke $old"
 fi
+[[ -x .venv/bin/python ]] || "$UV" venv --python "$CONTROLLER_PYTHON" .venv >/dev/null
+"$UV" pip install -q --python .venv/bin/python -r release/requirements.txt
+.venv/bin/ansible-galaxy collection install -r requirements.yml >/dev/null
+say ">>> ansible-core $(.venv/bin/python -c 'import ansible.release as r; print(r.__version__)') (Python $(.venv/bin/python -V | cut -d' ' -f2))"
 
-"$ANSIBLE_VENV/bin/python" -c \
-  'import sys; assert (3,12) <= sys.version_info[:2] <= (3,14)'
-
-# Install pinned Ansible
-"$UV_BIN" pip install \
-  --python "$ANSIBLE_VENV/bin/python" \
-  -r release/requirements.txt
-
-"$ANSIBLE_VENV/bin/ansible-galaxy" collection install \
-  -r requirements.yml
-
-# Deployment remains disabled until package preparation is ready
-if [[ "${BOOTSTRAP_DEPLOY_APPROVED:-false}" != "true" ]]; then
-  echo "A2 bootstrap prepared. Deployment not started."
+if [[ $SETUP_ONLY == 1 ]]; then
+  say "Setup selesai (--setup-only). Deploy: bash bootstrap.sh $INV"
   exit 0
 fi
 
-# Require separate authorization for package installation
-if [[ "${BOOTSTRAP_PACKAGES_APPROVED:-false}" != "true" ]]; then
-  echo "Package installation not approved. Deployment stopped." >&2
-  exit 2
+# 4. Package version mode.
+MODE="${PACKAGE_MODE:-}"
+if [[ -z "$MODE" ]]; then
+  if [[ -t 0 ]]; then
+    say ""
+    say "Pilih mode paket OS:"
+    say "  1) pinned            - pasang dari repo OS, jangan upgrade paket yang sudah ada [disarankan]"
+    say "  2) latest-compatible - upgrade semua paket gateway ke versi terbaru repo OS"
+    read -r -p "Pilihan [1]: " answer
+    case "${answer:-1}" in 1) MODE=pinned ;; 2) MODE=latest-compatible ;; *) die "pilihan tidak valid" ;; esac
+  else
+    MODE=pinned
+  fi
 fi
 
-# Phase 1: Install packages before configuring services
-"$ANSIBLE_VENV/bin/ansible-playbook" \
-  -i "$INV" \
-  playbooks/prepare-packages.yml \
-  "${CONN_ARGS[@]}" \
-  -e package_install_approved=true \
-  "$@"
+run_pb() { .venv/bin/ansible-playbook -i "$INV" "playbooks/$1.yml" "${@:2}"; }
 
-# Phase 2: Configure and verify services
-for playbook in prepare-server site commit-server; do
-  "$ANSIBLE_VENV/bin/ansible-playbook" \
-    -i "$INV" \
-    "playbooks/$playbook.yml" \
-    "${CONN_ARGS[@]}" "$@"
-done
+say ""; say "=== Tahap 1/5: paket OS ($MODE)"
+run_pb prepare-packages -e "package_version_mode=$MODE" "$@"
+say ""; say "=== Tahap 2/5: Speedtest Ookla (opsional)"
+if [[ "${SPEEDTEST:-1}" != "0" ]]; then
+  run_pb prepare-speedtest "$@" || say "Speedtest dilewati; instalasi tetap lanjut."
+else
+  say "dilewati (SPEEDTEST=0)"
+fi
+say ""; say "=== Tahap 3/5: rollback firewall (prepare-server)"
+run_pb prepare-server "$@"
+say ""; say "=== Tahap 4/5: konfigurasi service (site)"
+run_pb site "$@"
+say ""; say "=== Tahap 5/5: verifikasi & commit"
+run_pb commit-server "$@"
+say ""
+say "SELESAI. Buka menu: sudo menu"
+say "Domain belum diisi? Server memakai IP + sertifikat selfsigned; atur di Menu Sistem > 4."

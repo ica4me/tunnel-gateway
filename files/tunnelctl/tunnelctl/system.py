@@ -413,7 +413,9 @@ class SystemBackend:
             path = settings.get('cert_path', '/etc/haproxy/certs/' + settings['domain'] + '.pem')
             if Path(path).is_symlink() or os.stat(path).st_mode & 0o777 != 0o600: return False
             self.runner(['openssl', 'x509', '-in', path, '-noout', '-checkend', '0'])
-            output = self.runner(['openssl', 'x509', '-in', path, '-noout', '-checkhost', settings['domain']])
+            # IP mode (no domain configured yet): the self-signed certificate carries an IP SAN.
+            flag = '-checkip' if re.match(r'^\d{1,3}(\.\d{1,3}){3}$', str(settings['domain'])) else '-checkhost'
+            output = self.runner(['openssl', 'x509', '-in', path, '-noout', flag, settings['domain']])
             return 'does match certificate' in output and 'does NOT match' not in output
         probe('cert', certificate)
         probe('time', lambda: self.runner(['timedatectl', 'show', '-p', 'NTPSynchronized', '--value']).strip() == 'yes')

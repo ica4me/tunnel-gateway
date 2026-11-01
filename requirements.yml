@@ -1,6 +1,3 @@
 ---
-collections:
-  - name: ansible.posix
-    version: 2.1.0
-  - name: community.general
-    version: 10.6.0
+# Tidak ada koleksi Galaxy yang dibutuhkan: playbook hanya memakai modul ansible.builtin.
+collections: []

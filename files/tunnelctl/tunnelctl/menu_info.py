@@ -226,14 +226,18 @@ def dashboard(settings_override=None, backend=None, refresh=False):
     if not net:
         issues.append('Gagal menghubungi ipinfo.io (cek koneksi keluar server).')
 
-    dns_text = ', '.join(dns) if dns else 'tidak ditemukan'
-    dns_match = public_ip in dns
-    rows += [('#', 'DOMAIN & SERTIFIKAT'),
-             ('Domain', domain),
-             ('DNS A record', '{0} ({1})'.format(dns_text, 'cocok dengan IP publik' if dns_match else 'TIDAK cocok'),
-              None if dns_match else ui.RED)]
-    if not dns_match:
-        issues.append('DNS {0} tidak mengarah ke IP publik {1}.'.format(domain, public_ip))
+    rows.append(('#', 'DOMAIN & SERTIFIKAT'))
+    if ui.is_ip(domain):
+        rows.append(('Domain', 'BELUM DIATUR (memakai IP {0}, sertifikat selfsigned)'.format(domain), ui.YELLOW))
+        issues.append('Domain belum diatur: klien TLS perlu allowInsecure. Atur di Menu Sistem > 4.')
+    else:
+        dns_text = ', '.join(dns) if dns else 'tidak ditemukan'
+        dns_match = public_ip in dns
+        rows += [('Domain', domain),
+                 ('DNS A record', '{0} ({1})'.format(dns_text, 'cocok dengan IP publik' if dns_match else 'TIDAK cocok'),
+                  None if dns_match else ui.RED)]
+        if not dns_match:
+            issues.append('DNS {0} tidak mengarah ke IP publik {1}.'.format(domain, public_ip))
     if not cert.get('exists') or cert.get('error'):
         rows.append(('Sertifikat', 'tidak ditemukan / rusak', ui.RED))
         issues.append('Sertifikat TLS tidak ditemukan atau rusak.')

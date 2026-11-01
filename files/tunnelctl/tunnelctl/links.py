@@ -2,7 +2,19 @@
 import base64
 import copy
 import json
+import re
 from urllib.parse import quote, urlencode
+
+
+IP_RE = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
+
+
+def ip_mode_warning(domain):
+    """Before a domain is configured the gateway runs on its IP with a self-signed certificate."""
+    if IP_RE.match(str(domain or '')):
+        return ['Domain belum diatur: TLS memakai sertifikat selfsigned untuk IP; '
+                'aktifkan allowInsecure/skip-cert-verify di klien, atau atur domain (menu 7 > 4).']
+    return []
 
 
 def b64(value):
@@ -38,7 +50,7 @@ def account_detail(account, settings):
             'GET / HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf]Connection: Upgrade[crlf][crlf]',
             'GET / HTTP/1.1[crlf]Host: blog.ruangguru.com[crlf]Connection: Keep-Alive[crlf][crlf]PATCH / HTTP/1.1[crlf]Host: [host][crlf]Upgrade:websocket[crlf][crlf][split]HTTP/enhanced 200 Ok[crlf]',
             'CONNECT [host]:443 HTTP/1.1[crlf]Host: [host][crlf]Upgrade: websocket[crlf][crlf]']
-        result['warnings']=['SSH WS sebaiknya langsung ke IP VPS, bukan Cloudflare.','Kuota SSH tidak didukung; limit adalah jumlah sesi login.']
+        result['warnings']=['SSH WS sebaiknya langsung ke IP VPS, bukan Cloudflare.','Kuota SSH tidak didukung; limit adalah jumlah sesi login.']+ip_mode_warning(domain)
         return result
     result.update(ws_path=settings['ws_paths'][protocol],grpc_name=settings['grpc_names'].get(protocol),ss_method=settings.get('ss_method','chacha20-ietf-poly1305'))
     links=[]
@@ -61,5 +73,5 @@ def account_detail(account, settings):
     result['links']=links
     result['client_config']=client_config(account,settings)
     result['placeholders']={'ADDRESS':'IP VPS atau IP Cloudflare','HOST':'Domain/Host header pilihan; TLS SNI sesuai domain sertifikat'}
-    result['warnings']=['SS WS memakai query ekstensi Xray; bukan SIP002 transport universal.'] if protocol=='ss' else []
+    result['warnings']=(['SS WS memakai query ekstensi Xray; bukan SIP002 transport universal.'] if protocol=='ss' else [])+ip_mode_warning(domain)
     return result

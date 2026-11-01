@@ -1,15 +1,15 @@
 {
   "README.md": {
-    "sha256": "86746092d049e329247e6280d49503d26fb1cfd3767ddc9fe04b29ca6e1776f2",
-    "size": 4366
+    "sha256": "e0a332b789dbeb880aff118f5fd14f4d84fa612b6142929d8020c8b86d300cc6",
+    "size": 3428
   },
   "ansible.cfg": {
     "sha256": "2d3cfe4aeab98c8438fa20e497da990b96989000f60da993550e3c388dc93bc3",
     "size": 161
   },
   "bootstrap.sh": {
-    "sha256": "82d6475b83330e172af601ef9d21c8dd2ce475425bd2734b4242b4f48f806ed9",
-    "size": 2266
+    "sha256": "118ecf0ff32e054c086885ed7386a83b7d45b76c042c364ec190e0a83763f275",
+    "size": 4687
   },
   "docs/LICENSING.md": {
     "sha256": "6a192a7a2f4ca4cee31ae794851aaf2154c626387f60a567baf3633b53e361a3",
@@ -28,12 +28,12 @@
     "size": 61
   },
   "files/tunnelctl/tunnelctl/backup.py": {
-    "sha256": "af5d9b32203dc93716efd8d0085fab56092e053d27a7036bf237f0782def65d7",
-    "size": 16911
+    "sha256": "0ebacfec7b91e460c4fa543b665459d79b01a6b9bba96cee9811cdcd2921b5e6",
+    "size": 17153
   },
   "files/tunnelctl/tunnelctl/cli.py": {
-    "sha256": "4aeb9bdf77a65a68b70885e058b382ec12e93a5f526904a6726bf5556a79108e",
-    "size": 22446
+    "sha256": "fa27703accfc5eac28fc5bf2c926940e9caf7cedc751fb81d07290044647ee1a",
+    "size": 22704
   },
   "files/tunnelctl/tunnelctl/config.py": {
     "sha256": "bea0b956f19bdf8ed9e61d1c6712dfd2312f45998dd44494301ee30958363bb4",
@@ -52,24 +52,48 @@
     "size": 209
   },
   "files/tunnelctl/tunnelctl/links.py": {
-    "sha256": "28b1514739da17a5e60d553b47dea092737f4a0f348fabe4ff744792594510a3",
-    "size": 4083
+    "sha256": "68c8b4be6151433fcc4c45902cd4c5b3f8349786c4af13127b4b1e3e2c8bb4b1",
+    "size": 4559
   },
   "files/tunnelctl/tunnelctl/manager.py": {
-    "sha256": "b639f2b9d1f757f2fe651a76e31526e6a4025e0b37412f4d318a86b32a06a3de",
-    "size": 9877
+    "sha256": "57b2c6db0992c0449985a71a67eed024ee73cb2cf7fed7df9eb9cf83f6dbd69a",
+    "size": 9943
   },
   "files/tunnelctl/tunnelctl/menu.py": {
-    "sha256": "75be5223899d89b4d8457fa6ce9c0b461f21be7421c87a7569934aaf1c5b052e",
-    "size": 13089
+    "sha256": "fb0e5b8e20e31dbbacb2e318530116aab8b08fc35535a93d3fb9d1a49640e968",
+    "size": 3962
+  },
+  "files/tunnelctl/tunnelctl/menu_account.py": {
+    "sha256": "d6f9bdcae0e46d7884679e203b7bd011909caf9fca32c738e5a318fd97c28bd4",
+    "size": 20599
+  },
+  "files/tunnelctl/tunnelctl/menu_backup.py": {
+    "sha256": "90e08da045c7378eeedaa9fa0576f735476082f976cdcd947f7b204c25e5e41f",
+    "size": 6382
+  },
+  "files/tunnelctl/tunnelctl/menu_info.py": {
+    "sha256": "d2d93feaf4aeb80d0d1baaacb0f091bcbdfe5f38f96dbc45eaebf4c9516f4706",
+    "size": 17408
+  },
+  "files/tunnelctl/tunnelctl/menu_system.py": {
+    "sha256": "3523e08ee63666c6570a0686e277cf9e4841b320472f96e08d0722ca592d50b9",
+    "size": 25991
+  },
+  "files/tunnelctl/tunnelctl/menu_telegram.py": {
+    "sha256": "4035e5e6bcb3507765665775edb8915e8f1db03be28583c77e90edc01a322ec0",
+    "size": 17647
+  },
+  "files/tunnelctl/tunnelctl/menu_ui.py": {
+    "sha256": "88ee15e5c772dbf6f4e8a74b322caa7b3286d0959044abb2b13c291074f35fa5",
+    "size": 11962
   },
   "files/tunnelctl/tunnelctl/migrations/0001_init.sql": {
     "sha256": "ad6d7053f0b79a7a5c11ce2a2166ddde2d68701a75b0b520e1c376fb55ea0365",
     "size": 1335
   },
   "files/tunnelctl/tunnelctl/system.py": {
-    "sha256": "17b523864e0dd889039f55f49e303c326321881e91d2029dac47927ea8f516f9",
-    "size": 24444
+    "sha256": "b0b2d983bd20ad3adaf59f5cd01637831b0b805eba1cc7f8142a881c0a421860",
+    "size": 25407
   },
   "files/tunnelctl/tunnelctl/usage.py": {
     "sha256": "fb771b8eb693c7f1ad00c02929d7b04f8fb84fd25446412712bdb62c23308515",
@@ -84,12 +108,12 @@
     "size": 1160
   },
   "inventories/example/group_vars/all/versions.yml": {
-    "sha256": "48cb424979cd4ba05741edb58754648c943de24bbcd2ab7ec0a037f5e84d4785",
-    "size": 1594
+    "sha256": "5568eb4125228d2013574ae78a605ea0696b2a85e4bc041e606682f5683528a3",
+    "size": 1596
   },
   "inventories/new-server/hosts.yml": {
-    "sha256": "274bbe0a7b04c2e41bde2155d583a955da2dc273b5ce70b6c2e406a36a6eed2e",
-    "size": 2430
+    "sha256": "00987941b1d772f7f74281b26de9b159da6378d899b79559348ec01b5a8f768f",
+    "size": 2849
   },
   "playbooks/backup.yml": {
     "sha256": "c72903754baa36bb6cab9b7b4a4c9a67df5a7b9853fcdeaa4d7b73179e5c836c",
@@ -99,17 +123,25 @@
     "sha256": "699a3dccfc9ba5fa6be5444b95c6f4377b90c04e1d43d8fdff8d083c367087f2",
     "size": 1144
   },
+  "playbooks/prepare-packages.yml": {
+    "sha256": "852fcd7315ff069545f31f24a1659578e9a35cf830a54f14739808b2f4742235",
+    "size": 7666
+  },
   "playbooks/prepare-server.yml": {
-    "sha256": "be3ccbfeca95c8999d9a488d23149b419154af36bdcb9c185346b76c252d9d91",
-    "size": 2477
+    "sha256": "60137a033f9b094c7eb1664306339b4ca3ddc2cea27517945b7c14582059d3df",
+    "size": 3004
+  },
+  "playbooks/prepare-speedtest.yml": {
+    "sha256": "e53a97aae2a2e311973165d315c37ede061afb4ef97475a9327a3cbe47f59e31",
+    "size": 3961
   },
   "playbooks/restore.yml": {
     "sha256": "f19775b4f958c5cad1bf93be1a644a33bca8d0396f7e81260163ef9eea4ea388",
     "size": 1491
   },
   "playbooks/site.yml": {
-    "sha256": "f84d8f004f622310d87d5a406ae4dd18bc11c19d30b9b1e9721177ef17b3ef2d",
-    "size": 3115
+    "sha256": "96e5735637849d894e8e56018404d4a86b09a8f7ce3376f82d8aaca92ff4b100",
+    "size": 5103
   },
   "playbooks/uninstall.yml": {
     "sha256": "2df084b0c06aa802648abf1e580e9e2652bfa2f1f7ac81bb27019cdabe7272dc",
@@ -119,33 +151,57 @@
     "sha256": "35f6aa07c595f31ed58452f1626d2dad544bd5271fd183c2e912db119e3a1f55",
     "size": 120
   },
+  "playbooks/vars/gateway-packages.yml": {
+    "sha256": "b362fc28d655bf744a9389300b560938d073a1932709b0eff1cd11a4bcf23562",
+    "size": 381
+  },
+  "playbooks/vars/package-versions/debian-12.yml": {
+    "sha256": "fa66bcaa59ad1d1e3b856bb97597fb237b6e61f7363f7f3180b65f6fd73d0422",
+    "size": 862
+  },
+  "playbooks/vars/package-versions/debian-13.yml": {
+    "sha256": "183ec0f1dfbf8140c0da5cbddd4478709ebbd23e6ed28d1b56da01e1047b5e00",
+    "size": 835
+  },
+  "playbooks/vars/package-versions/ubuntu-22.04.yml": {
+    "sha256": "5783ef0da54fe5da7cb9712ad8b06d83b2950fb7ee1b5e5b78438edbd993f37e",
+    "size": 989
+  },
+  "playbooks/vars/package-versions/ubuntu-24.04.yml": {
+    "sha256": "9d0ca811d1eac8ff99f46a4d8594486d06d0c62ab5226b0a60aed46e188035b3",
+    "size": 997
+  },
+  "playbooks/vars/package-versions/ubuntu-26.04.yml": {
+    "sha256": "5d68a4fb56d79be2fae69e0f749f27bfdd2aba911e46c5937c97c1101092d19d",
+    "size": 941
+  },
   "playbooks/verify.yml": {
-    "sha256": "b163617c42be07d2637df83ac9423967bdb3ff8aeeb62bc4a346df4a2347cb69",
-    "size": 2613
+    "sha256": "f013128edcf15172e22bb49bde0f0f1802484f0d56fd9dea8cfb9fd4b4d17d47",
+    "size": 2637
   },
   "release/ansible.cfg": {
     "sha256": "2d3cfe4aeab98c8438fa20e497da990b96989000f60da993550e3c388dc93bc3",
     "size": 161
   },
   "release/bootstrap.sh": {
-    "sha256": "82d6475b83330e172af601ef9d21c8dd2ce475425bd2734b4242b4f48f806ed9",
-    "size": 2266
+    "sha256": "118ecf0ff32e054c086885ed7386a83b7d45b76c042c364ec190e0a83763f275",
+    "size": 4687
   },
   "release/build-release.py": {
-    "sha256": "3768d516773d6d22cb3d0b62615342a4098858a83d6dd4d87b8ab8044dd03ce6",
-    "size": 5376
+    "sha256": "9950efbb2bfe7b2d6c44000c3d1625b6edcb0d20f7aa548d96e176bc2a96fda2",
+    "size": 5786
   },
   "release/requirements.txt": {
-    "sha256": "20628e4b0909986c58e297d886efa42fd97cb328d403f62620f2d224b15867df",
-    "size": 77
+    "sha256": "823077cd2a6ae1b85f84ddb4603087a8923c4bb39bd87bc0973d50228570871f",
+    "size": 120
   },
   "requirements.txt": {
-    "sha256": "20628e4b0909986c58e297d886efa42fd97cb328d403f62620f2d224b15867df",
-    "size": 77
+    "sha256": "823077cd2a6ae1b85f84ddb4603087a8923c4bb39bd87bc0973d50228570871f",
+    "size": 120
   },
   "requirements.yml": {
-    "sha256": "408214ca5a5166488bcf0336e7a907469ef3b6629b1ba3e425404e6fc0689170",
-    "size": 108
+    "sha256": "b455425b7dc74578af05060f36df2a13bb48f2113376850a19b3e764ebdc7d9a",
+    "size": 110
   },
   "roles/backup/defaults/main.yml": {
     "sha256": "1e5452378927eee9092a295307e774c187c551721e06a166dfefa648dadbe009",
@@ -164,8 +220,8 @@
     "size": 170
   },
   "roles/badvpn/tasks/main.yml": {
-    "sha256": "01f342c30e473ae319634341c471be04e7c83ad6fb61a2c5300c91db45ba5ccd",
-    "size": 2146
+    "sha256": "a0dd9a23f0ad2a09854a894306b9990a71cd26c1a8ed0e1a8910a139c3751dea",
+    "size": 2004
   },
   "roles/badvpn/templates/badvpn-udpgw@.service.j2": {
     "sha256": "19d4a376890ee25c3d0d8d1f387151c51c9f2a666d7d98a306237c1c7e408f4e",
@@ -180,12 +236,12 @@
     "size": 4153
   },
   "roles/certs/tasks/http-bootstrap.yml": {
-    "sha256": "f2fcdf64c892019f8a6248c457efdc2c24880bb616dedc16594bad21a251f655",
-    "size": 870
+    "sha256": "c754e34368e40a2053dcbf40854cd67abdc9b9dd7ca64ad7c0cda8b5cc354905",
+    "size": 707
   },
   "roles/certs/tasks/main.yml": {
-    "sha256": "48478722f89a49302c231da6c627ae0405d1f31d6074abfa27556be3471740f9",
-    "size": 2545
+    "sha256": "97058e68347d0a4df91005834aac1dd20e92fd91d0316007539e0d8316515643",
+    "size": 2623
   },
   "roles/certs/templates/cert-deploy.j2": {
     "sha256": "0376c6cc277a8ff2b5c846d6cf093cc9f71c778a812167d7d9b4172b293fba6f",
@@ -216,12 +272,12 @@
     "size": 212
   },
   "roles/common/tasks/main.yml": {
-    "sha256": "7ade88fc4730a8c563bfbbd4ada69b7ba7f893bb48c7025026b0ae8964ba5c08",
-    "size": 1972
+    "sha256": "638612542c2bb37f17305206cf93323d7d94cd7cf47bae5da008cd6e1ff720a1",
+    "size": 2669
   },
   "roles/common/tasks/ownership.yml": {
-    "sha256": "bc1b5ef362de6fa9c1e84e9f206835ced9d13972bbcedcb1b7452b1863f3081b",
-    "size": 2979
+    "sha256": "1a1dddb9d772dbb65bdaf6c318c3e1e9b8c9db3fcbbc0e930df45054409dd117",
+    "size": 3022
   },
   "roles/common/templates/journald.conf.j2": {
     "sha256": "de2ede32477b2363bfebcccff5023d23615659adb57db1a3f250929982837a4e",
@@ -244,8 +300,8 @@
     "size": 134
   },
   "roles/dropbear/tasks/main.yml": {
-    "sha256": "026dd45021b591be753d6e441ab8276369655e9b78bf129629b0d806070352f1",
-    "size": 1480
+    "sha256": "3fed3ef0857af66c1fda1177f7a09fafebba9020f2b4b3e15eb023f785d7019d",
+    "size": 1348
   },
   "roles/dropbear/templates/banner.txt.j2": {
     "sha256": "c0d9aab6024c2947da0012063285da0d31b453e7ca26695eb7e03ef6dadb495f",
@@ -264,8 +320,8 @@
     "size": 96
   },
   "roles/fail2ban/tasks/main.yml": {
-    "sha256": "7d7fc278404b931d6016b5faa910b56dce1b96755efb4a0326d7cfb36229bd03",
-    "size": 554
+    "sha256": "9cf7b5719159d62dab72816b96bca33f7556affdb82374337b1b6873da73167e",
+    "size": 391
   },
   "roles/fail2ban/templates/jail.local.j2": {
     "sha256": "7bca03cb837373bc378ebe633d5d6d4130aca76e88e4af2f91d3e7c6ffdb9fa4",
@@ -304,12 +360,12 @@
     "size": 116
   },
   "roles/haproxy/tasks/main.yml": {
-    "sha256": "65dbb10cb37b7faf3cfc2c3662a0e5ba7610a8f02d750187c49a8625c4a8eef7",
-    "size": 1581
+    "sha256": "c3700a67a90a1181dc4b202b408b3158f567a033adc69385693d70e88c006cee",
+    "size": 1443
   },
   "roles/haproxy/templates/classifier.lua.j2": {
-    "sha256": "c51509221451be6b4a0f104c5371b1e07b2ad4a31cf10917e9cd0c335645349c",
-    "size": 1016
+    "sha256": "33c12ce7911977845f7d351dcacfcd327ddedbb60ff55fdd458208b1c6af9682",
+    "size": 1209
   },
   "roles/haproxy/templates/haproxy.cfg.j2": {
     "sha256": "2224a17685c218a81724c2a298308b67cac0250bacbc365579bbc691859d8e24",
@@ -328,8 +384,8 @@
     "size": 112
   },
   "roles/nginx/tasks/main.yml": {
-    "sha256": "dcb52d46734e9ade72619a098f33531a2b36c19541b04fd343690925ad6ec99e",
-    "size": 1549
+    "sha256": "894dd20949db184c1c80071c5e0bf3b1e514410f6fa1b5423d4638d8ec782a4e",
+    "size": 1831
   },
   "roles/nginx/templates/hardening.conf.j2": {
     "sha256": "e56a81dfc2443114005958242ae4419a813822c282a794e3a8027ade4daf48c1",
@@ -340,8 +396,8 @@
     "size": 185
   },
   "roles/nginx/templates/nginx.conf.j2": {
-    "sha256": "052da18d5e2448c724a77c7820c28edcc94341fe826a265e106d108b9966379b",
-    "size": 1184
+    "sha256": "1f142dc6d8bc745470730e4041f0818f22d9db27a83d8f76f1e789c14395e5f7",
+    "size": 1338
   },
   "roles/nginx/templates/tunnel-nginx.conf.j2": {
     "sha256": "dd2b6c527aca97c821341177d611cce65a4a87e76cc278735811de6f6f725995",
@@ -364,20 +420,20 @@
     "size": 382
   },
   "roles/preflight/tasks/foundation.yml": {
-    "sha256": "addfff5aa90de0aa80920a69e9ea2790cb92b43ce0644ec4ee37fcdc94a9032a",
-    "size": 4205
+    "sha256": "03c2bbc2e33b859a299a164502a369498acc044690265a42f4ae3ce2a13277fe",
+    "size": 3596
   },
   "roles/preflight/tasks/main.yml": {
     "sha256": "b1bee7b402526c42212152a51d1bcb5f8bb07a7d2b2c1acaece89fbd1070bf0c",
     "size": 742
   },
   "roles/tunnelctl/defaults/main.yml": {
-    "sha256": "22579802c598e626c05c3a720c3226de6019f5d891c6ad4b70aa045b2bb7f3d8",
-    "size": 269
+    "sha256": "f1411bde7167fc73edbdc4b9e19af02e4987046b8602c434187771f103451a20",
+    "size": 412
   },
   "roles/tunnelctl/tasks/main.yml": {
-    "sha256": "ca2d7da2d390abfb74bbfb9ff40ad588596a900ca2db87637f102cacdf36970e",
-    "size": 5551
+    "sha256": "b1656049b7113c6148499a266b0bf99e518a83cd4345c82a6c46b1c994426e5c",
+    "size": 6122
   },
   "roles/tunnelctl/templates/menu.j2": {
     "sha256": "3ab2d4e4fbb5d968537b761712655f8e020dd9368eebe13c148d6c6946afd570",
@@ -394,6 +450,10 @@
   "roles/tunnelctl/templates/tunnel-backup.timer.j2": {
     "sha256": "c1851b0d0b17a806fc2f381fdb46b4a16edd4e09784e0c62bb33654da52369e3",
     "size": 145
+  },
+  "roles/tunnelctl/templates/tunnel-domain-change.j2": {
+    "sha256": "c9016b8544d9d5937b22c3b73b49b0b8f25930d4b76ba30a3240ce3bbc444901",
+    "size": 11402
   },
   "roles/tunnelctl/templates/tunnel-expiry.service.j2": {
     "sha256": "f633c163eebace050a66b32a2ff668631bc458cf293fe3f4953dcbac5f6e1a00",
@@ -432,8 +492,8 @@
     "size": 5409
   },
   "roles/wsepro/tasks/main.yml": {
-    "sha256": "1438e225cf5e7098a7abfaa4e83a22f9e705521818f53a8ba0a0b70ccae43784",
-    "size": 2997
+    "sha256": "e0f4dbcc461b6397e5962f99e177d3df5293592d904e31eebea7633abf47f7ea",
+    "size": 2888
   },
   "roles/wsepro/templates/ws-epro.conf.j2": {
     "sha256": "a1c0cf2257518c5c974d8c46675370f1e0835591dd8608e56db059032329923a",

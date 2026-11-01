@@ -10,3 +10,6 @@ __pycache__/
 # Local logs and temporary files
 logs/
 *.log
+
+# Local backups created by the domain-change helper (contain real domains)
+inventories/*/hosts.yml.bak-*

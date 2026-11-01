@@ -19,7 +19,12 @@ import uuid
 from pathlib import Path
 
 DOMAIN_RE = re.compile(r'^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$')
-DOMAIN_LINE = re.compile(r'^(\s*tunnel_domain:\s*)(["\']?)([^"\'\s#]+)(["\']?)(.*)$', re.M)
+IP_RE = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$')
+DOMAIN_LINE = re.compile(r'^(\s*tunnel_domain:\s*)(["\']?)([^"\'\s#]*)(["\']?)(.*)$', re.M)
+CERT_LINE = re.compile(r'^(\s*cert_mode:\s*)(["\']?)([a-z0-9_]+)(["\']?)(.*)$', re.M)
+EMAIL_LINE = re.compile(r'^(\s*admin_email:\s*)(["\']?)([^"\'\s#]*)(["\']?)(.*)$', re.M)
+CERT_MODES = ('http01', 'dns_cloudflare', 'selfsigned')
 PLAYBOOKS = ('prepare-server', 'site', 'commit-server')
 ACME_ROOT = Path('/var/www/tunnel-acme')
 LOCK_PATH = '/run/tunnel/domain-change.lock'
@@ -131,15 +136,43 @@ def forget_old_acme(old):
         say('Perpanjangan otomatis sertifikat domain lama ({0}) dihentikan.'.format(old))
 
 
+def _one(pattern, text, what):
+    found = pattern.findall(text)
+    if len(found) != 1:
+        die('{0} harus muncul tepat satu kali (tanpa template) di {1}; ditemukan {2}.'.format(what, INVENTORY, len(found)))
+    return found[0][2]
+
+
+def _set(pattern, text, value):
+    return pattern.sub(lambda m: m.group(1) + m.group(2) + value + m.group(4) + m.group(5), text, count=1)
+
+
 def main():
-    parser = argparse.ArgumentParser(description='Ganti domain tunnel gateway di server ini lewat Ansible.')
-    parser.add_argument('domain')
+    parser = argparse.ArgumentParser(description='Atur/ganti domain dan sertifikat TLS tunnel gateway lewat Ansible.')
+    parser.add_argument('domain', nargs='?')
+    parser.add_argument('--cert-mode', choices=CERT_MODES, help='mode sertifikat untuk domain (default: tetap)')
+    parser.add_argument('--email', help='email ACME (wajib untuk http01/dns_cloudflare jika belum ada)')
+    parser.add_argument('--show', action='store_true', help='tampilkan setelan inventory saat ini (JSON) lalu keluar')
     parser.add_argument('--yes', action='store_true', help='tanpa pertanyaan konfirmasi')
     parser.add_argument('--skip-dns-check', action='store_true', help='lewati cek DNS dan HTTP (mis. Cloudflare proxied)')
     args = parser.parse_args()
 
     if os.geteuid() != 0:
         die('jalankan sebagai root.')
+    inventory = Path(INVENTORY)
+    text = inventory.read_text()
+    cert_lines = [m for m in CERT_LINE.finditer(text)]
+    old = _one(DOMAIN_LINE, text, 'tunnel_domain')
+    old_cert = _one(CERT_LINE, text, 'cert_mode') if cert_lines else 'selfsigned'
+    old_email = _one(EMAIL_LINE, text, 'admin_email')
+    if args.show:
+        import json
+        print(json.dumps({'domain': old, 'cert_mode': old_cert, 'admin_email': old_email,
+                          'ip_mode': not old, 'inventory': INVENTORY}))
+        return 0
+    if not args.domain:
+        die('domain wajib diisi (atau pakai --show).')
+
     Path(LOCK_PATH).parent.mkdir(parents=True, exist_ok=True)
     lock = open(LOCK_PATH, 'w')
     try:
@@ -152,41 +185,44 @@ def main():
     new = args.domain.strip().lower().rstrip('.')
     if not DOMAIN_RE.match(new):
         die('format domain tidak valid: {0}'.format(new))
-    inventory = Path(INVENTORY)
-    text = inventory.read_text()
-    found = DOMAIN_LINE.findall(text)
-    if len(found) != 1:
-        die('tunnel_domain harus muncul tepat satu kali di {0} (ditemukan {1}).'.format(INVENTORY, len(found)))
-    old = found[0][2]
-    if old == new:
-        say('Domain sudah {0}; tidak ada yang diubah.'.format(new))
+    cert = args.cert_mode or (old_cert if old else 'http01')
+    email = (args.email or old_email or '').strip()
+    if cert != 'selfsigned' and (not EMAIL_RE.match(email) or email.endswith(('@domain.com', '@example.com'))):
+        die('email ACME belum valid ({0}); isi dengan --email alamat@anda.com'.format(email or 'kosong'))
+    if new == old and cert == old_cert and email == old_email:
+        say('Domain {0} dengan mode {1} sudah aktif; tidak ada yang diubah.'.format(new, cert))
         return 0
-    new_text = DOMAIN_LINE.sub(lambda m: m.group(1) + m.group(2) + new + m.group(4) + m.group(5), text, count=1)
+
+    new_text = _set(DOMAIN_LINE, text, new)
+    new_text = _set(CERT_LINE, new_text, cert)
+    new_text = _set(EMAIL_LINE, new_text, email)
     leftovers = [line.strip() for line in new_text.splitlines()
                  if not line.strip().startswith('#') and (
-                     old in line
+                     (old and old != new and old in line)
                      or (re.match(r'^\s+domain:', line) and 'tunnel_domain' not in line)
                      or ('/etc/haproxy/certs/' in line and 'tunnel_domain' not in line))]
     if leftovers:
-        die('domain lama masih tertulis langsung di inventory; ganti dengan "{{ tunnel_domain }}" lalu ulangi:\n  '
+        die('domain masih tertulis langsung di inventory; ganti dengan "{{ tunnel_domain }}" lalu ulangi:\n  '
             + '\n  '.join(leftovers))
 
     ip = public_ip()
     addresses = resolve(new)
-    say('Domain lama : {0}'.format(old))
+    say('Domain lama : {0}'.format(old or '(belum diatur - mode IP)'))
     say('Domain baru : {0}'.format(new))
+    say('Sertifikat  : {0} -> {1}'.format(old_cert if old else 'selfsigned (IP)', cert))
     say('IP server   : {0}'.format(ip or '-'))
     say('DNS A baru  : {0}'.format(', '.join(addresses) or 'tidak ditemukan'))
     if not args.skip_dns_check:
         if not ip or ip not in addresses:
             die('DNS {0} belum mengarah ke {1}. Arahkan A record (Cloudflare: DNS only) lalu tunggu propagasi.'.format(new, ip or 'IP server'))
-        say('Cek akses HTTP port 80 lewat domain baru ...')
-        if not http_check(new):
-            die('http://{0}/.well-known/acme-challenge/ tidak sampai ke server ini (cek DNS, proxy Cloudflare, port 80).'.format(new))
-        say('Cek DNS dan HTTP: OK')
+        if cert == 'http01':
+            say('Cek akses HTTP port 80 lewat domain baru ...')
+            if not http_check(new):
+                die('http://{0}/.well-known/acme-challenge/ tidak sampai ke server ini (cek DNS, proxy Cloudflare, port 80).'.format(new))
+        say('Cek DNS{0}: OK'.format(' dan HTTP' if cert == 'http01' else ''))
 
     if not args.yes:
-        answer = input('Lanjutkan ganti domain ke {0}? [y/N]: '.format(new)).strip().lower()
+        answer = input('Lanjutkan? [y/N]: ').strip().lower()
         if answer not in ('y', 'ya', 'yes'):
             say('Dibatalkan.')
             return 0
@@ -201,21 +237,22 @@ def main():
     say('Menjalankan prepare -> site -> commit. Perkiraan 3-10 menit; port 443 sempat terputus saat sertifikat diterbitkan.')
 
     if run_all(log_dir, stamp, 'apply'):
-        forget_old_acme(old)
+        if old and old != new and not IP_RE.match(old):
+            forget_old_acme(old)
         say('')
         say('=' * 60)
-        say('BERHASIL: domain sekarang {0}'.format(new))
+        say('BERHASIL: domain {0} ({1})'.format(new, cert))
         say('Sertifikat berlaku sampai: {0}'.format(cert_end(new)))
-        say('Link akun memakai domain baru; bagikan ulang ke pelanggan (menu Detail akun).')
+        say('Link akun memakai domain ini; bagikan ulang ke pelanggan (menu Detail akun).')
         say('=' * 60)
         return 0
 
     say('')
-    say('Terjadi kegagalan. Mengembalikan domain lama ({0}) ...'.format(old))
+    say('Terjadi kegagalan. Mengembalikan setelan lama ({0}) ...'.format(old or 'mode IP'))
     shutil.copy2(str(backup), str(inventory))
     if run_all(log_dir, stamp, 'rollback'):
         say('')
-        say('ROLLBACK BERHASIL: server kembali memakai {0}. Periksa log di {1}.'.format(old, log_dir))
+        say('ROLLBACK BERHASIL: server kembali ke {0}. Periksa log di {1}.'.format(old or 'mode IP', log_dir))
     else:
         say('')
         say('ROLLBACK GAGAL. Jalankan manual dari {0}:'.format(REPO_DIR))

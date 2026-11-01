@@ -15,6 +15,7 @@ from .cli import run
 
 WIDTH = 78
 USERNAME_RE = re.compile(r'^[a-z0-9_]{3,32}$')
+IP_RE = re.compile(r'^\d{1,3}(\.\d{1,3}){3}$')
 PROTOCOLS = ('ssh', 'vmess', 'vless', 'trojan', 'ss')
 PROTO_NAME = {'ssh': 'SSH WebSocket', 'vmess': 'VMess', 'vless': 'VLESS', 'trojan': 'Trojan', 'ss': 'Shadowsocks'}
 STATUS_LABEL = {'active': 'aktif', 'locked': 'terkunci', 'expired': 'expired',
@@ -34,6 +35,11 @@ MARK_BAD = '\u2718' if _utf8() else 'x'
 
 
 # ---------------------------------------------------------------- output
+
+def is_ip(value):
+    """True while no domain is configured (gateway runs on its IP, self-signed)."""
+    return bool(IP_RE.match(str(value or '')))
+
 
 def paint(text, code):
     if code and sys.stdout.isatty() and not os.environ.get('NO_COLOR'):

@@ -46,9 +46,16 @@
   loop:
     - /var/lib/tunnel
     - /var/lib/tunnel/exports
+- name: Read current timezone
+  ansible.builtin.command:
+    argv: [timedatectl, show, -p, Timezone, --value]
+  register: common_timezone_current
+  changed_when: false
 - name: Set local display timezone
-  community.general.timezone:
-    name: '{{ timezone }}'
+  ansible.builtin.command:
+    argv: [timedatectl, set-timezone, '{{ timezone }}']
+  when: common_timezone_current.stdout | trim != timezone
+  changed_when: true
 - name: Enable chrony
   ansible.builtin.systemd:
     name: chrony

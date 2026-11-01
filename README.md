@@ -2,7 +2,7 @@
 
 Script gratis dan otomatis untuk menginstal VPN Gateway di server Anda. Dikelola sepenuhnya melalui antarmuka CLI yang ringan dan interaktif, tanpa menggunakan panel web yang memakan banyak resource.
 
-![Menu Tunnel Gateway](https://private-user-images.githubusercontent.com/122198219/691370136-8643fa2d-3715-4d71-b4b7-71458440dd82.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3OTM1MjA0MzAsIm5iZiI6MTc5MzUyMDEzMCwicGF0aCI6Ii8xMjIxOTgyMTkvNjkxMzcwMTM2LTg2NDNmYTJkLTM3MTUtNGQ3MS1iNGI3LTcxNDU4NDQwZGQ4Mi5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYxMTAxJTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MTEwMVQwODAyMTBaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT00NzRkZGJkNTM4MjBjMzlkMjE2ZDI4NWE4ZmVlNmQ0NmFlNmNhZWNkNmFkZjFhN2Q0ODI4YWQyNWMwY2IyMzQ2JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.p1rL_iw83wv_5pP-TJ-EhGv38lrS3ZqpjdDc8THDB2g)
+![Menu Tunnel Gateway](docs/menu.png)
 
 ## ✨ Fitur Utama
 
@@ -34,90 +34,62 @@ Script gratis dan otomatis untuk menginstal VPN Gateway di server Anda. Dikelola
 
 ## 🖥️ Dukungan Sistem Operasi
 
-Script ini secara spesifik **hanya mendukung** sistem operasi berikut (amd64/arm64):
+Hanya OS berikut (amd64/arm64), dengan **langkah instalasi yang sama**:
 
-* **Ubuntu 22.04** (✅ *Sangat Direkomendasikan & Sudah Teruji*)
+| OS | Status |
+|---|---|
+| Ubuntu 22.04 | ✅ Teruji penuh (server produksi) |
+| Ubuntu 24.04 | Teruji sebagian (paket, classifier HAProxy 2.8) |
+| Ubuntu 26.04 | Belum diuji di server nyata |
+| Debian 12 | Belum diuji di server nyata |
+| Debian 13 | Belum diuji di server nyata |
 
-* Ubuntu 24.04
+Perbedaan antar-OS ditangani otomatis: Python 3.12 terpisah untuk Ansible bila Python OS lebih lama
+(Ubuntu 22.04, Debian 12), sintaks HTTP/2 Nginx, dan manifest versi paket per OS.
 
-* Ubuntu 26.04
+## ⚙️ Instalasi (sama untuk semua OS)
 
-* Debian 12
+Syarat: server bersih, login `root`, port **22, 80, 443** terbuka di firewall/security group provider.
 
-* Debian 13
-
-*OS di luar daftar ini (seperti CentOS, Alpine, dll) tidak didukung.*
-
-## ⚙️ Persiapan & Instalasi Paket
-
-Login ke VPS Anda sebagai `root` dan jalankan perintah berikut secara berurutan:
-
-```
-# 1. Update dan install dependensi dasar
-apt-get update
-apt-get install -y tmux python3-venv python3-pip openssh-client
-
-# 2. Buka sesi tmux agar proses aman meski koneksi SSH terputus
-tmux new -s install
-
-# 3. Clone repositori ke dalam folder /root
+```bash
+apt-get update && apt-get install -y git tmux
+tmux new -s install                 # proses aman walau SSH terputus
 git clone https://github.com/ica4me/tunnel-gateway.git /root/tunnel-gateway
 cd /root/tunnel-gateway
-
-# 4. Siapkan environment Python & Ansible
-python3 -m venv .venv
-.venv/bin/python -m pip install -r release/requirements.txt
-.venv/bin/ansible-galaxy collection install -r requirements.yml
-
-# 5. Verifikasi sintaks playbook (Pastikan tidak ada error)
-for p in prepare-server site commit-server; do
-  .venv/bin/ansible-playbook playbooks/$p.yml --syntax-check || break
-done
-
-# 6. (Opsional) Cek konfigurasi target inventory Anda
-.venv/bin/ansible-inventory --host worker-test1 | grep -E 'domain|cert_mode|connection'
-
+bash bootstrap.sh                   # inventories/new-server/hosts.yml
 ```
 
-### ▶️ Mulai Deploy Server
+`bootstrap.sh` menjalankan 5 tahap: paket OS → Speedtest (opsional) → rollback firewall → konfigurasi
+service → verifikasi. Saat diminta, pilih mode paket **1 (pinned)**.
 
-Setelah mengedit file konfigurasi host Anda di folder `inventories/` (misal mengganti domain, email, dll), jalankan perintah deploy utama:
+Sebelum menjalankan, cek `inventories/new-server/hosts.yml`:
 
-```
-# Ganti path inventory sesuai dengan konfigurasi Anda
-BOOTSTRAP_PYTHON=python3 bash release/bootstrap.sh inventories/new-server/hosts.yml
+- `ssh_admin_port` = port SSH yang sedang Anda pakai; port SSH lain masukkan ke `ssh_admin_extra_ports`.
+- `tunnel_domain` **boleh dikosongkan**: server memakai IP publik + sertifikat selfsigned.
 
-```
+Tanpa pertanyaan: `PACKAGE_MODE=pinned bash bootstrap.sh` · tanpa Speedtest: `SPEEDTEST=0 bash bootstrap.sh`.
+Update/perbaikan: jalankan ulang `bash bootstrap.sh` (aman diulang).
+
+### 🌐 Domain & sertifikat (setelah instalasi)
+
+1. Buat A record domain → IP server di Cloudflare (**DNS only**, awan abu-abu).
+2. `menu` → **7 Menu Sistem** → **4 Domain & Sertifikat TLS** → isi domain & email.
+
+Sertifikat Let's Encrypt diterbitkan otomatis dan diperpanjang otomatis. Jika gagal, setelan lama
+dipulihkan otomatis.
 
 ## 🛠️ Manajemen Server & Akun
 
-Semua pengelolaan dilakukan melalui CLI langsung di dalam VPS target.
-
-**Buka Menu Interaktif Utama:**
-
-```
-sudo menu
-
-```
-
-**Contoh Perintah Cepat (`tunnelctl`):**
-
-```
-# Mengecek kesehatan komponen server
-sudo tunnelctl doctor --json
-
-# Membuat akun VLESS
-sudo tunnelctl account create --proto vless --user pelanggan --days 30 --quota 10G --limit 2
-
-# Melihat daftar akun & status online
-sudo tunnelctl account list
-sudo tunnelctl account online
-
-# Melakukan backup server manual
-sudo tunnelctl backup create
-
+```bash
+menu                                   # menu interaktif
+tunnelctl doctor --json                # cek kesehatan
+tunnelctl account create --proto vless --user pelanggan --days 30 --quota 10G --limit 2
+tunnelctl account list
+tunnelctl backup create
 ```
 
 ## 📄 Lisensi
 
-Proyek ini dirilis di bawah lisensi **WTFPL v2.0**. Silakan lihat file [LICENSING.md](docs/LICENSING.md) untuk informasi lebih lanjut.
+Kode proyek ini (playbook, role, `tunnelctl`) dirilis di bawah **WTFPL v2.0**. Komponen pihak ketiga
+memakai lisensinya masing-masing; Ws-Epro belum memiliki lisensi yang jelas. Lihat
+[docs/LICENSING.md](docs/LICENSING.md).
