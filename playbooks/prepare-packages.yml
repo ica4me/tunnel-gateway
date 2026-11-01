@@ -126,6 +126,15 @@
       changed_when: false
       failed_when: false
 
+    # chrony conflicts with systemd-timesyncd (present on Debian 12 and Ubuntu 22.04/24.04 cloud images).
+    # This is the only package removal allowed; the main install below keeps fail_on_autoremove.
+    - name: Replace systemd-timesyncd with chrony
+      ansible.builtin.apt:
+        name: chrony
+        state: present
+        policy_rc_d: 101
+      when: "'chrony' in gateway_packages"
+
     - name: Install gateway packages without starting services
       ansible.builtin.apt:
         name: "{{ gateway_packages }}"

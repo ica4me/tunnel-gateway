@@ -124,8 +124,8 @@
     "size": 1144
   },
   "playbooks/prepare-packages.yml": {
-    "sha256": "852fcd7315ff069545f31f24a1659578e9a35cf830a54f14739808b2f4742235",
-    "size": 7666
+    "sha256": "b39aa42557192b457bf0e97dc1116cf582797aa834d391cfa861bcd992eff217",
+    "size": 8059
   },
   "playbooks/prepare-server.yml": {
     "sha256": "60137a033f9b094c7eb1664306339b4ca3ddc2cea27517945b7c14582059d3df",
