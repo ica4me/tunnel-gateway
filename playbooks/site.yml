@@ -102,6 +102,9 @@
     - role: common
       tags:
         - common
+    - role: tuning
+      tags:
+        - tuning
     - role: firewall
       tags:
         - firewall

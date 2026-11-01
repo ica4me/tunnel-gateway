@@ -6,7 +6,7 @@ After=network.target
 Type=simple
 ExecStart=/usr/sbin/dropbear -E -F -w -g -r /etc/dropbear/dropbear_ed25519_host_key -b {{ dropbear_banner_path }} {% for p in dropbear_ports %}-p {{ dropbear_bind_address }}:{{ p }} {% endfor %}{{ '\n' }}Restart=always
 RestartSec=2
-LimitNOFILE=65535
+LimitNOFILE={{ tuning_nofile | default(65535) }}
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes

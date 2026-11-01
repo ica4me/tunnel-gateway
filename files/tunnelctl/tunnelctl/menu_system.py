@@ -425,29 +425,66 @@ def logs(settings_override=None, backend=None):
             ui.write('')
 
 
+HHMM_RE = re.compile(r'^([01][0-9]|2[0-3]):[0-5][0-9]$')
+
+
 def autoreboot(settings_override=None, backend=None):
-    conf = ui.settings(settings_override)
-    state = ui.unit_states(['tunnel-autoreboot.timer'])['tunnel-autoreboot.timer']
-    available = state.get('LoadState') not in ('not-found', 'unknown')
-    rows = [('#', 'AUTO-REBOOT'),
-            ('Setelan saat ini', conf.get('autoreboot') or 'mati'),
-            ('Unit timer', 'terpasang' if available else 'BELUM terpasang', None if available else ui.YELLOW)]
-    if available:
-        rows.append(('Jadwal berikutnya', ui.short_ts(state.get('NextElapseUSecRealtime'))))
-    ui.title('AUTO-REBOOT')
-    ui.write_lines(ui.box(rows))
-    if not available:
-        ui.note('Fitur auto-reboot belum aktif: unit tunnel-autoreboot.timer belum dipasang oleh Ansible. '
-                'Akan ditambahkan pada tahap perbaikan fungsi.')
-        return
-    value = ui.ask('Jam reboot harian HH:MM, "off" untuk mematikan (kosong = batal): ').lower()
-    if not value:
-        ui.write('Dibatalkan.')
-        return
-    args = ['system', 'autoreboot', 'off'] if value == 'off' else ['system', 'autoreboot', 'set', value]
-    code, _ = ui.run_json(args, settings_override, backend)
-    if code == 0:
-        ui.ok('auto-reboot ' + ('dimatikan' if value == 'off' else 'diset ke ' + value))
+    while True:
+        ui.clear()
+        ui.title('AUTO-REBOOT')
+        code, state = ui.run_json(['system', 'autoreboot', 'status'], settings_override, backend)
+        if code != 0 or not isinstance(state, dict):
+            return
+        facts = info.system_facts()
+        tz = facts.get('timezone') or '-'
+        on = bool(state.get('enabled') and state.get('active'))
+        rows = [('#', 'AUTO-REBOOT HARIAN'),
+                ('Status', 'AKTIF' if on else 'mati', ui.GREEN if on else None),
+                ('Jam reboot', '{0} ({1})'.format(state['time'], tz) if on and state.get('time') else '-'),
+                ('Reboot berikutnya', ui.short_ts(state.get('next')) if on else '-'),
+                ('Uptime saat ini', ui.duration(facts['uptime']) if facts.get('uptime') is not None else '-')]
+        if not state.get('installed'):
+            rows.append(('Unit timer', 'BELUM terpasang', ui.YELLOW))
+        ui.write_lines(ui.box(rows))
+        if not state.get('installed'):
+            ui.note('Unit tunnel-autoreboot belum dipasang. Jalankan ulang: bash bootstrap.sh (dari folder repo).')
+            return
+        ui.note('Reboot memutus semua koneksi pelanggan sekitar 1-2 menit. Pilih jam paling sepi. '
+                'Server tidak akan reboot jika baru menyala kurang dari 15 menit.')
+        ui.write(' 1. {0} jam reboot harian'.format('Ubah' if on else 'Atur'))
+        if on:
+            ui.write(' 2. Matikan auto-reboot')
+        ui.write(' 0. Kembali')
+        choice = ui.ask('Pilih: ')
+        if choice in ('', '0', 'q', 'Q'):
+            return
+        if choice == '1':
+            current = state.get('time') if on else None
+            if current:
+                ui.write('Jam saat ini: {0} ({1})'.format(current, tz))
+            value = ui.ask('Jam reboot harian HH:MM, waktu server {0} [{1}] (q = batal): '.format(tz, current or '04:00'))
+            if value.lower() == 'q':
+                ui.write('Dibatalkan.')
+            else:
+                value = value or current or '04:00'
+                if not HHMM_RE.match(value):
+                    ui.fail('format jam harus HH:MM, contoh 04:00.')
+                elif ui.ask_yes('Server akan reboot setiap hari pukul {0} ({1}). Lanjutkan? [y/N]: '.format(value, tz)):
+                    code, result = ui.run_json(['system', 'autoreboot', 'set', value], settings_override, backend)
+                    if code == 0 and isinstance(result, dict):
+                        ui.ok('auto-reboot aktif pukul {0}; berikutnya {1}.'.format(value, ui.short_ts(result.get('next'))))
+                else:
+                    ui.write('Dibatalkan.')
+        elif choice == '2' and on:
+            if ui.ask_yes('Matikan auto-reboot? [y/N]: '):
+                code, _ = ui.run_json(['system', 'autoreboot', 'off'], settings_override, backend)
+                if code == 0:
+                    ui.ok('auto-reboot dimatikan.')
+            else:
+                ui.write('Dibatalkan.')
+        else:
+            ui.write('Pilihan tidak valid.')
+        ui.pause()
 
 
 def _log_sizes():
@@ -546,6 +583,9 @@ def system_menu(settings_override=None, backend=None):
         if choice in ('0', 'q', 'Q'):
             return
         ui.clear()
+        if choice in ('4', '9'):  # sub-menus with their own loop and pause
+            actions[choice](settings_override, backend)
+            continue
         if choice in actions:
             actions[choice](settings_override, backend)
         else:

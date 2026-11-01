@@ -26,6 +26,15 @@
     - /etc/systemd/system/tunnel-acme-renew.timer
     - /etc/systemd/system/tunnel-usage.service
     - /etc/systemd/system/tunnel-usage.timer
+    - /etc/systemd/system/tunnel-autoreboot.service
+    - /etc/systemd/system/tunnel-autoreboot.timer
+    - /etc/systemd/system/tunnel-maintenance.service
+    - /etc/systemd/system/tunnel-maintenance.timer
+    - /usr/local/sbin/tunnel-maintenance
+    - /etc/sysctl.d/98-tunnel-tuning.conf
+    - /etc/modules-load.d/tunnel-bbr.conf
+    - /etc/security/limits.d/90-tunnel.conf
+    - /etc/systemd/system.conf.d/90-tunnel-limits.conf
     - /etc/systemd/system/tunnel-limit.service
     - /etc/systemd/system/tunnel-limit.timer
     - /etc/systemd/system/tunnel-expiry.service

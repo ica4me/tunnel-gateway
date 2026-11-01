@@ -1,0 +1,160 @@
+---
+# ---------------------------------------------------------------- BBR + network sysctl
+# tcp_available_congestion_control only lists LOADED modules, so tcp_bbr must be loaded first.
+- name: Load BBR congestion control module
+  ansible.builtin.command:
+    argv: [modprobe, tcp_bbr]
+  register: tuning_modprobe
+  changed_when: false
+  failed_when: false
+  when: tuning_enabled | bool
+
+- name: Load BBR on every boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/tunnel-bbr.conf
+    content: "# Managed by Ansible (role tuning)\ntcp_bbr\n"
+    owner: root
+    group: root
+    mode: '0644'
+  when: tuning_enabled | bool and tuning_modprobe.rc | default(1) == 0
+
+- name: Read available congestion controls after loading BBR
+  ansible.builtin.command:
+    argv: [sysctl, -n, net.ipv4.tcp_available_congestion_control]
+  register: tuning_congestion
+  changed_when: false
+  when: tuning_enabled | bool
+
+- name: Decide whether BBR can be used
+  ansible.builtin.set_fact:
+    tuning_bbr_available: "{{ 'bbr' in tuning_congestion.stdout.split() }}"
+  when: tuning_enabled | bool
+
+- name: Configure network and kernel tuning
+  ansible.builtin.template:
+    src: sysctl-tuning.conf.j2
+    dest: /etc/sysctl.d/98-tunnel-tuning.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Apply tuning sysctl
+  when: tuning_enabled | bool
+
+# ---------------------------------------------------------------- open files (ulimit)
+- name: Raise open-file limit for login sessions
+  ansible.builtin.template:
+    src: limits.conf.j2
+    dest: /etc/security/limits.d/90-tunnel.conf
+    owner: root
+    group: root
+    mode: '0644'
+  when: tuning_enabled | bool
+
+- name: Create systemd manager drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: tuning_enabled | bool
+
+- name: Raise default open-file limit for all systemd services
+  ansible.builtin.template:
+    src: systemd-limits.conf.j2
+    dest: /etc/systemd/system.conf.d/90-tunnel-limits.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reexec systemd manager
+  when: tuning_enabled | bool
+
+# ---------------------------------------------------------------- unnecessary services
+- name: List installed snaps (Ubuntu)
+  ansible.builtin.command:
+    argv: [snap, list]
+  register: tuning_snaps
+  changed_when: false
+  failed_when: false
+  when: tuning_enabled | bool and tuning_disable_snapd | bool and ansible_facts.distribution == 'Ubuntu'
+
+- name: Decide whether snapd can be disabled safely
+  ansible.builtin.set_fact:
+    tuning_extra_snaps: >-
+      {{ (tuning_snaps.stdout_lines | default([]))[1:]
+         | map('split') | map('first') | reject('in', tuning_snapd_base_snaps) | list }}
+  when: tuning_enabled | bool and tuning_disable_snapd | bool and tuning_snaps.rc | default(1) == 0
+
+- name: Keep snapd because other snaps depend on it
+  ansible.builtin.debug:
+    msg: "snapd TIDAK dimatikan; snap lain terpasang: {{ tuning_extra_snaps | join(', ') }}"
+  when: tuning_extra_snaps | default([]) | length > 0
+
+- name: Stop, disable and mask snapd
+  ansible.builtin.systemd:
+    name: '{{ item }}'
+    state: stopped
+    enabled: false
+    masked: true
+  loop: [snapd.service, snapd.socket, snapd.seeded.service]
+  failed_when: false
+  when:
+    - tuning_enabled | bool and tuning_disable_snapd | bool
+    - tuning_snaps.rc | default(1) == 0
+    - tuning_extra_snaps | default([]) | length == 0
+
+- name: Read which optional units exist
+  ansible.builtin.command:
+    argv: [systemctl, list-unit-files, '{{ item }}', --no-legend, --no-pager]
+  loop: '{{ tuning_disable_units }}'
+  register: tuning_optional_units
+  changed_when: false
+  failed_when: false
+  when: tuning_enabled | bool
+
+- name: Disable unnecessary services that are present
+  ansible.builtin.systemd:
+    name: '{{ item.item }}'
+    state: stopped
+    enabled: false
+  loop: '{{ tuning_optional_units.results | default([]) }}'
+  loop_control:
+    label: '{{ item.item }}'
+  failed_when: false
+  when: tuning_enabled | bool and item.stdout | default('') | length > 0
+
+# ---------------------------------------------------------------- hourly maintenance
+- name: Install hourly maintenance script
+  ansible.builtin.template:
+    src: tunnel-maintenance.j2
+    dest: /usr/local/sbin/tunnel-maintenance
+    owner: root
+    group: root
+    mode: '0750'
+  when: tuning_enabled | bool
+
+- name: Install hourly maintenance units
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: /etc/systemd/system/{{ item }}
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [tunnel-maintenance.service, tunnel-maintenance.timer]
+  when: tuning_enabled | bool
+
+- name: Enable or disable hourly maintenance
+  ansible.builtin.systemd:
+    name: tunnel-maintenance.timer
+    enabled: '{{ tuning_maintenance_enabled | bool }}'
+    state: "{{ 'started' if tuning_maintenance_enabled | bool else 'stopped' }}"
+    daemon_reload: true
+  when: tuning_enabled | bool
+
+- name: Report tuning summary
+  ansible.builtin.debug:
+    msg: >-
+      Tuning: congestion control {{ 'bbr' if tuning_bbr_available | default(false) else 'bawaan (BBR tidak tersedia di kernel)' }},
+      nofile {{ tuning_nofile }}, pemeliharaan per jam {{ 'aktif' if tuning_maintenance_enabled | bool else 'mati' }},
+      log senyap {{ 'aktif' if gateway_quiet_logs | default(true) | bool else 'mati' }}.
+  when: tuning_enabled | bool

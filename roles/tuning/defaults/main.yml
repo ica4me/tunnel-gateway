@@ -1,0 +1,35 @@
+---
+# All values can be overridden in the inventory; the safe defaults also live in
+# inventories/example/group_vars/all/main.yml so every role sees them.
+tuning_enabled: true
+tuning_nofile: 1048576
+tuning_sysctl:
+  # Bigger socket buffers for long-lived tunnels (max 16 MiB per socket).
+  net.core.rmem_max: 16777216
+  net.core.wmem_max: 16777216
+  net.ipv4.tcp_rmem: 4096 87380 16777216
+  net.ipv4.tcp_wmem: 4096 65536 16777216
+  # Bursts of new connections (HAProxy accepts everything on 80/443).
+  net.core.netdev_max_backlog: 16384
+  net.ipv4.tcp_max_syn_backlog: 8192
+  net.ipv4.tcp_syncookies: 1
+  # Mobile clients: MTU black holes and idle connections.
+  net.ipv4.tcp_mtu_probing: 1
+  net.ipv4.tcp_slow_start_after_idle: 0
+  net.ipv4.tcp_notsent_lowat: 16384
+  # Faster cleanup of dead and closing connections.
+  net.ipv4.tcp_fin_timeout: 15
+  net.ipv4.tcp_keepalive_time: 600
+  net.ipv4.tcp_keepalive_intvl: 30
+  net.ipv4.tcp_keepalive_probes: 5
+  net.ipv4.tcp_tw_reuse: 1
+  net.ipv4.tcp_max_tw_buckets: 262144
+  # File handles (fs.file-max is set by the common role).
+  fs.nr_open: 1048576
+  vm.swappiness: 10
+tuning_disable_snapd: true
+tuning_snapd_base_snaps: [core, core18, core20, core22, core24, snapd, bare, lxd]
+tuning_disable_units: [apport.service, motd-news.timer, ModemManager.service]
+tuning_maintenance_enabled: true
+tuning_drop_cache_below_percent: 10
+tuning_zombie_restart_threshold: 20

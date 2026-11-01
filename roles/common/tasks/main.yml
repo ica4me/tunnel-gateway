@@ -76,14 +76,6 @@
     group: root
     mode: '0644'
   notify: Restart journald
-- name: Read available congestion controls
-  ansible.builtin.command:
-    argv:
-      - sysctl
-      - -n
-      - net.ipv4.tcp_available_congestion_control
-  register: common_congestion
-  changed_when: false
 - name: Configure sysctl.conf.j2
   ansible.builtin.template:
     src: sysctl.conf.j2

@@ -37,6 +37,10 @@
         state: stopped
         enabled: false
       loop: '{{ uninstall_ledger.keys() | select("match", "^/etc/systemd/system/[^/]+[.]timer$") | list }}'
+    - name: Remove scheduled-reboot drop-in written by tunnelctl
+      ansible.builtin.file:
+        path: /etc/systemd/system/tunnel-autoreboot.timer.d
+        state: absent
     - name: Stop only distro services whose main config is owned
       ansible.builtin.systemd:
         name: '{{ item.service }}'

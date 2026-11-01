@@ -9,7 +9,7 @@ import stat
 import zipfile
 
 ROLES = ('common', 'firewall', 'certs', 'openssh_admin', 'dropbear', 'badvpn',
-         'wsepro', 'xray', 'nginx', 'haproxy', 'fail2ban', 'backup', 'tunnelctl', 'preflight')
+         'wsepro', 'xray', 'nginx', 'haproxy', 'fail2ban', 'backup', 'tunnelctl', 'preflight', 'tuning')
 #PLAYBOOKS = ('prepare-server.yml', 'commit-server.yml', 'site.yml', 'verify.yml', 'backup.yml', 'restore.yml', 'update.yml', 'uninstall.yml')
 PLAYBOOKS = (
     'prepare-packages.yml',

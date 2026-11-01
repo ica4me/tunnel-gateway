@@ -1,5 +1,4 @@
 # Managed by Ansible
-# Managed by Ansible
 [Unit]
 Description=BadVPN UDPGW on port %i
 After=network.target
@@ -9,12 +8,10 @@ Type=simple
 User=nobody
 Group=nogroup
 CapabilityBoundingSet=
-User=nobody
-Group=nogroup
-CapabilityBoundingSet=
 ExecStart={{ badvpn_install_bin }} --listen-addr 127.0.0.1:%i --max-clients {{ badvpn_max_clients }} --max-connections-for-client {{ badvpn_max_connections_for_client }}
 Restart=always
 RestartSec=2
+LimitNOFILE={{ tuning_nofile | default(65535) }}
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true

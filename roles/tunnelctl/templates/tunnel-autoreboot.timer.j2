@@ -1,0 +1,12 @@
+# Managed by Ansible. Disabled by default; the schedule comes from a drop-in written by
+# `tunnelctl system autoreboot set HH:MM` (tunnel-autoreboot.timer.d/schedule.conf).
+[Unit]
+Description=Tunnel gateway scheduled reboot
+[Timer]
+OnCalendar=*-*-* 04:00:00
+AccuracySec=1min
+# Never catch up a missed reboot at boot time.
+Persistent=false
+Unit=tunnel-autoreboot.service
+[Install]
+WantedBy=timers.target

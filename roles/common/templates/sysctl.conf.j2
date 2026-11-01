@@ -2,7 +2,4 @@
 {% for key, value in common_sysctl.items() %}
 {{ key }} = {{ value }}
 {% endfor %}
-{% if 'bbr' in common_congestion.stdout.split() %}
-net.core.default_qdisc = fq
-net.ipv4.tcp_congestion_control = bbr
-{% endif %}
+{# BBR is configured by the tuning role (it loads tcp_bbr first). #}

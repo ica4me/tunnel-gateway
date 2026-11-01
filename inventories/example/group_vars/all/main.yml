@@ -52,3 +52,11 @@ xray_grpc_ports:
 nginx_web_port: 8080
 nginx_h2c_port: 10010
 xray_block_bittorrent: true
+# --- Tuning server (role tuning) ---
+tuning_enabled: true
+tuning_nofile: 1048576                # batas open files untuk service & login
+tuning_disable_snapd: true            # Ubuntu; dilewati jika ada snap selain snap dasar
+tuning_maintenance_enabled: true      # pemeliharaan aman setiap jam
+tuning_drop_cache_below_percent: 10   # lepas page cache hanya jika RAM tersedia < 10%; 0 = tidak pernah
+# --- Log senyap: matikan access log Xray, log koneksi HAProxy, access log Nginx (error tetap ada) ---
+gateway_quiet_logs: true

@@ -134,6 +134,20 @@
     - tunnel-backup.service
     - tunnel-backup.timer
   when: tunnelctl_enabled | bool
+- name: Install scheduled-reboot units (state is owned by tunnelctl, never enabled here)
+  ansible.builtin.template:
+    src: '{{ item }}.j2'
+    dest: /etc/systemd/system/{{ item }}
+    mode: '0644'
+  loop:
+    - tunnel-autoreboot.service
+    - tunnel-autoreboot.timer
+  register: tunnelctl_autoreboot_units
+  when: tunnelctl_enabled | bool
+- name: Reload systemd after scheduled-reboot unit changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: tunnelctl_enabled | bool and tunnelctl_autoreboot_units is changed
 - name: Require reviewed transactional backup before enabling backup schedule
   ansible.builtin.assert:
     that:

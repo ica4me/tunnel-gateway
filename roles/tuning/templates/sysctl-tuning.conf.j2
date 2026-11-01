@@ -1,0 +1,8 @@
+# Managed by Ansible (role tuning)
+{% if tuning_bbr_available %}
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+{% endif %}
+{% for key, value in tuning_sysctl.items() %}
+{{ key }} = {{ value }}
+{% endfor %}

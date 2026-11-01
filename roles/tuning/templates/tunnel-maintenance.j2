@@ -1,0 +1,45 @@
+#!/bin/bash
+# Managed by Ansible (role tuning). Hourly gateway maintenance.
+# Deliberately NOT done: writing to net.ipv4.tcp_mem (would starve TCP) or dropping caches every hour
+# (Linux frees cache on demand; dropping it only forces disk re-reads).
+set -u
+THRESHOLD={{ tuning_drop_cache_below_percent | int }}
+ZOMBIE_LIMIT={{ tuning_zombie_restart_threshold | int }}
+SERVICES="haproxy xray ws-epro dropbear-tunnel nginx"
+log() { logger -t tunnel-maintenance -- "$*"; echo "$*"; }
+
+udpgw=$(systemctl list-units 'badvpn-udpgw@*.service' --all --no-legend --plain 2>/dev/null | awk '{print $1}')
+
+# 1. Restart gateway services that systemd marked as failed.
+for unit in $SERVICES $udpgw; do
+  if systemctl is-failed --quiet "$unit"; then
+    systemctl reset-failed "$unit"
+    if systemctl restart "$unit"; then log "restart $unit: sebelumnya failed"; else log "GAGAL restart $unit"; fi
+  fi
+done
+
+# 2. Zombies can only be reaped by their parent: report them, and restart a gateway service
+#    only if it accumulated many of them.
+zombies=$(ps -eo stat=,ppid= | awk '$1 ~ /^Z/ {print $2}')
+if [ -n "$zombies" ]; then
+  log "zombie: $(echo "$zombies" | wc -l) proses; PID induk: $(echo "$zombies" | sort -u | tr '\n' ' ')"
+  for ppid in $(echo "$zombies" | sort | uniq -c | awk -v limit="$ZOMBIE_LIMIT" '$1 >= limit {print $2}'); do
+    unit=$(ps -o unit= -p "$ppid" 2>/dev/null | tr -d ' ')
+    for svc in $SERVICES; do
+      if [ "$unit" = "$svc.service" ]; then systemctl restart "$svc" && log "restart $svc: terlalu banyak zombie"; fi
+    done
+  done
+fi
+stuck=$(ps -eo stat= | awk '$1 ~ /^D/' | wc -l)
+[ "$stuck" -gt 0 ] && log "proses tertahan I/O (D): $stuck"
+
+# 3. Release page cache only under real memory pressure.
+total=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+avail=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
+pct=$(( avail * 100 / total ))
+if [ "$THRESHOLD" -gt 0 ] && [ "$pct" -lt "$THRESHOLD" ]; then
+  sync
+  echo 1 > /proc/sys/vm/drop_caches
+  log "RAM tersedia ${pct}% < ${THRESHOLD}%: page cache dilepas"
+fi
+log "ok: RAM tersedia ${pct}%, load $(cut -d' ' -f1-3 /proc/loadavg)"

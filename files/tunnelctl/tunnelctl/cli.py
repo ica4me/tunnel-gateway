@@ -211,6 +211,8 @@ def build_parser():
     autoreboot_set.add_argument('--json', action='store_true')
     autoreboot_off = autoreboot_sub.add_parser('off')
     autoreboot_off.add_argument('--json', action='store_true')
+    autoreboot_status = autoreboot_sub.add_parser('status')
+    autoreboot_status.add_argument('--json', action='store_true')
 
     system_clean = system_sub.add_parser('clean-logs')
     system_clean.add_argument('--json', action='store_true')
@@ -336,6 +338,13 @@ def _system_handler(args, manager):
         if args.follow:
             return EXIT_OK
         _print({'logs': value}, as_json=as_json)
+        return EXIT_OK
+
+    if command == 'autoreboot' and args.autoreboot_command == 'status':
+        fn = getattr(manager.backend, 'get_autoreboot', None)
+        if not callable(fn):
+            raise InputError('Backend tidak mendukung autoreboot')
+        _print(fn(manager.settings), as_json=as_json)
         return EXIT_OK
 
     if command == 'autoreboot':

@@ -1,0 +1,8 @@
+# Managed by Ansible. Started only by tunnel-autoreboot.timer.
+[Unit]
+Description=Tunnel gateway scheduled reboot
+[Service]
+Type=oneshot
+# Skip when the system booted less than 15 minutes ago (protects against reboot loops after clock jumps).
+ExecCondition=/bin/sh -c 'test "$$(cut -d. -f1 /proc/uptime)" -ge 900'
+ExecStart=/bin/sh -c 'logger -t tunnel-autoreboot "Reboot terjadwal oleh tunnel-gateway"; exec /bin/systemctl reboot'

@@ -7,3 +7,4 @@ PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
+LimitNOFILE={{ tuning_nofile | default(65535) }}

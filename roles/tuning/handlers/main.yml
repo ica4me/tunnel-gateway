@@ -1,0 +1,7 @@
+---
+- name: Apply tuning sysctl
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/98-tunnel-tuning.conf
+  changed_when: true
+- name: Reexec systemd manager
+  ansible.builtin.systemd:
+    daemon_reexec: true

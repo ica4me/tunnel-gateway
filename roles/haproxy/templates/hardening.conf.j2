@@ -1,6 +1,6 @@
 # Managed by Ansible
 [Service]
-LimitNOFILE=65535
+LimitNOFILE={{ tuning_nofile | default(65535) }}
 NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=yes

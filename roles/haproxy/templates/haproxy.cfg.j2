@@ -1,15 +1,21 @@
 # Managed by Ansible
 global
+{% if not (gateway_quiet_logs | default(true) | bool) %}
     log stdout format raw local0
+{% endif %}
     lua-load /etc/haproxy/classifier.lua
     user haproxy
     group haproxy
     maxconn {{ haproxy_maxconn }}
 
 defaults
+{% if gateway_quiet_logs | default(true) | bool %}
+    no log
+{% else %}
     log global
-    mode tcp
     option tcplog
+{% endif %}
+    mode tcp
     timeout connect 10s
     timeout client 1h
     timeout server 1h

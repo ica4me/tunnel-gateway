@@ -501,22 +501,53 @@ class SystemBackend:
             args.extend(['-n', '200'])
         return self.runner(args)
 
-    def set_autoreboot(self, settings, value):
+    def _autoreboot_paths(self, settings):
         unit = settings.get('autoreboot_unit', 'tunnel-autoreboot.timer')
-        dropin_dir = Path('/etc/systemd/system') / (unit + '.d')
-        dropin_file = dropin_dir / 'override.conf'
+        base = Path(settings.get('systemd_dir', '/etc/systemd/system'))
+        return unit, base / unit, base / (unit + '.d') / 'schedule.conf'
+
+    def _systemctl_value(self, args):
+        try:
+            return self.runner(['systemctl'] + args).strip()
+        except TunnelCtlError:
+            return ''
+
+    def get_autoreboot(self, settings):
+        """Schedule state read from systemd itself (settings.json is rewritten by Ansible)."""
+        unit, unit_file, dropin = self._autoreboot_paths(settings)
+        schedule = None
+        if dropin.exists() and not dropin.is_symlink():
+            found = re.findall(r'^OnCalendar=\*-\*-\* (\d{2}:\d{2}):00\s*$', dropin.read_text(), re.M)
+            schedule = found[-1] if found else None
+        enabled = self._systemctl_value(['is-enabled', unit]) == 'enabled'
+        active = self._systemctl_value(['is-active', unit]) == 'active'
+        next_run = self._systemctl_value(['show', unit, '-p', 'NextElapseUSecRealtime', '--value']) or None
+        return {'unit': unit, 'installed': unit_file.exists(), 'enabled': enabled, 'active': active,
+                'time': schedule, 'next': next_run if (enabled and active) else None}
+
+    def set_autoreboot(self, settings, value):
+        unit, unit_file, dropin = self._autoreboot_paths(settings)
+        if not unit_file.exists():
+            raise TunnelCtlError('Unit {0} belum terpasang; jalankan ulang bootstrap.sh atau site.yml.'.format(unit))
+        legacy = dropin.parent / 'override.conf'  # written by the previous implementation (Persistent=true)
+        if legacy.exists() and not legacy.is_symlink():
+            legacy.unlink()
         if value is None:
-            if dropin_file.exists() and not dropin_file.is_symlink():
-                dropin_file.unlink()
             self.runner(['systemctl', 'disable', '--now', unit])
+            if dropin.exists() and not dropin.is_symlink():
+                dropin.unlink()
             self.runner(['systemctl', 'daemon-reload'])
-            return {'autoreboot': None, 'unit': unit}
-        dropin_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        content = '[Timer]\nOnCalendar=*-*-* {0}:00\nPersistent=true\n'.format(value)
-        atomic_write(dropin_file, content)
-        self.runner(['systemctl', 'daemon-reload'])
-        self.runner(['systemctl', 'enable', '--now', unit])
-        return {'autoreboot': value, 'unit': unit}
+        else:
+            dropin.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            atomic_write(dropin, '# Managed by tunnelctl (menu Auto-reboot)\n[Timer]\nOnCalendar=\n'
+                                 'OnCalendar=*-*-* {0}:00\n'.format(value))
+            os.chmod(str(dropin), 0o644)
+            self.runner(['systemctl', 'daemon-reload'])
+            self.runner(['systemctl', 'enable', unit])
+            self.runner(['systemctl', 'restart', unit])  # recompute the next elapse from the new schedule
+        result = self.get_autoreboot(settings)
+        result['autoreboot'] = value
+        return result
 
     def clean_logs(self):
         self.runner(['journalctl', '--vacuum-time=7d'])

@@ -1,0 +1,5 @@
+# Managed by Ansible (role tuning): open files for login sessions
+*    soft nofile {{ tuning_nofile }}
+*    hard nofile {{ tuning_nofile }}
+root soft nofile {{ tuning_nofile }}
+root hard nofile {{ tuning_nofile }}

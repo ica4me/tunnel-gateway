@@ -65,6 +65,9 @@ def system_facts():
     values = dict(line.split('=', 1) for line in out.splitlines() if '=' in line)
     facts['timezone'] = values.get('Timezone', '-')
     facts['ntp'] = values.get('NTPSynchronized') == 'yes'
+    facts['congestion'] = _read('/proc/sys/net/ipv4/tcp_congestion_control').strip() or '-'
+    facts['qdisc'] = _read('/proc/sys/net/core/default_qdisc').strip() or '-'
+    facts['nr_open'] = _read('/proc/sys/fs/nr_open').strip() or '-'
     return facts
 
 
@@ -91,7 +94,10 @@ def system_rows(facts):
         rows.append(('Load (1/5/15 mnt)', '{0:.2f} / {1:.2f} / {2:.2f}'.format(*facts['load'])))
     rows += [('Uptime', ui.duration(facts['uptime']) if facts['uptime'] is not None else '-'),
              ('Waktu server', '{0} ({1})'.format(facts['now'], facts['timezone'])),
-             ('Sinkron NTP', 'ya' if facts['ntp'] else 'TIDAK', None if facts['ntp'] else ui.RED)]
+             ('Sinkron NTP', 'ya' if facts['ntp'] else 'TIDAK', None if facts['ntp'] else ui.RED),
+             ('TCP congestion', '{0} (qdisc {1})'.format(facts.get('congestion', '-'), facts.get('qdisc', '-')),
+              ui.GREEN if facts.get('congestion') == 'bbr' else ui.YELLOW),
+             ('Batas open files', facts.get('nr_open', '-'))]
     return rows
 
 
