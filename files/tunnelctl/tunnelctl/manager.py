@@ -180,3 +180,51 @@ class Manager:
         accounts=self.rows()
         if protocol: accounts=[a for a in accounts if a['protocol']==protocol]
         return self.backend.online(accounts,self.settings)
+
+    def online_activity(self, protocol=None, interval=None):
+        """Terhubung vs aktif trafik, khusus tampilan menu (bukan untuk enforcement)."""
+        fn = getattr(self.backend, 'online_activity', None)
+        if not callable(fn):
+            raise InputError('Backend tidak mendukung pengamatan aktivitas')
+        if protocol:
+            util_module.validate_protocol(protocol)
+        accounts = [a for a in self.rows() if not protocol or a['protocol'] == protocol]
+        if interval is None:
+            interval = self.settings.get('online_sample_seconds', 3)
+        return fn(accounts, self.settings, interval=interval)
+
+    # ------------------------------------------------------------ laporan (read-only)
+
+    def usage_top(self, day=None, limit=20, protocol=None):
+        """Ranking pemakaian trafik satu hari dari usage_daily (diisi collector tunnel-usage).
+
+        Read-only: tidak memanggil collector, reset, atau enforcement. Hari = tanggal UTC, sama dengan
+        tanggal yang dipakai collector saat mencatat."""
+        if day is None:
+            day = self.clock().date().isoformat()
+        try:
+            datetime.date.fromisoformat(str(day))
+        except ValueError as exc:
+            raise InputError('Format tanggal harus YYYY-MM-DD') from exc
+        if not isinstance(limit, int) or limit < 1 or limit > 1000:
+            raise InputError('Limit harus 1-1000')
+        if protocol:
+            util_module.validate_protocol(protocol)
+        where = 'd.day = ? AND d.up + d.down > 0'
+        params = [str(day)]
+        if protocol:
+            where += ' AND a.protocol = ?'
+            params.append(protocol)
+        connection = self.db.connection
+        rows = connection.execute(
+            'SELECT a.id, a.username, a.protocol, a.status, a.is_trial, d.up, d.down, d.up + d.down AS total '
+            'FROM usage_daily AS d JOIN accounts AS a ON a.id = d.account_id '
+            'WHERE ' + where + ' ORDER BY total DESC, a.id LIMIT ?', params + [limit]).fetchall()
+        summary = connection.execute(
+            'SELECT COUNT(*), COALESCE(SUM(d.up), 0), COALESCE(SUM(d.down), 0) '
+            'FROM usage_daily AS d JOIN accounts AS a ON a.id = d.account_id WHERE ' + where, params).fetchone()
+        return {'day': str(day), 'timezone': 'UTC', 'limit': limit, 'protocol': protocol,
+                'accounts': int(summary[0]), 'total_up': int(summary[1]), 'total_down': int(summary[2]),
+                'rows': [{'username': r['username'], 'protocol': r['protocol'], 'status': r['status'],
+                          'is_trial': bool(r['is_trial']), 'up': int(r['up']), 'down': int(r['down']),
+                          'total': int(r['total'])} for r in rows]}

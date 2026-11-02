@@ -1,4 +1,3 @@
-"""Per-protocol account menus: tables, detail view, current-value prompts."""
 import json
 from pathlib import Path
 
@@ -70,41 +69,115 @@ def pick_account(protocol, settings_override=None, backend=None, title=''):
         ui.write('Tidak ada di tabel, coba lagi.')
 
 
-def show_online(protocol, settings_override=None, backend=None):
+ACTIVITY_VIEW = {'active': ('AKTIF TRAFIK', ui.GREEN), 'idle': ('IDLE', ui.YELLOW),
+                 'unmeasured': ('BELUM TERUKUR', ui.YELLOW), 'error': ('GAGAL BACA', ui.RED),
+                 'offline': ('OFFLINE', None)}
+ACTIVITY_ORDER = {'active': 0, 'idle': 1, 'unmeasured': 2, 'error': 3, 'offline': 4}
+
+
+def fetch_activity(protocol=None, settings_override=None, backend=None):
+    """Satu snapshot untuk semua protokol (atau satu protokol). None jika perintah gagal."""
+    args = ['account', 'online', '--activity'] + (['--proto', protocol] if protocol else [])
+    code, data = ui.run_json(args, settings_override, backend)
+    if code != 0 or not isinstance(data, dict) or not isinstance(data.get('items'), list):
+        return None
+    return data
+
+
+def _rate(item, interval):
+    delta = item.get('delta_bytes')
+    if item.get('state') != 'active' or not delta or not interval:
+        return ''
+    return '{0}B/s'.format(ui.size(delta / float(interval)))
+
+
+def render_activity(protocol, items, interval):
+    """Tabel satu protokol; mengembalikan hitungan status."""
     ssh = protocol == 'ssh'
-    ui.title('CEK ONLINE ' + ui.PROTO_NAME[protocol].upper())
-    code, items = ui.run_json(['account', 'online', '--proto', protocol], settings_override, backend)
-    if code != 0 or not isinstance(items, list):
-        return 0, 0
+    counts = dict((state, 0) for state in ACTIVITY_ORDER)
+    connections = 0
+    ui.title('ONLINE ' + ui.PROTO_NAME[protocol].upper())
     if not items:
         ui.write('Tidak ada akun aktif.')
-        return 0, 0
-    try:
-        limits = dict((row['username'], int(row.get('ip_limit') or 0))
-                      for row in ui.accounts(settings_override, backend, protocol=protocol))
-    except Exception:
-        limits = {}
-    for item in items:
-        item['_count'] = int(item.get('sessions', 0)) if ssh else len(item.get('ips') or [])
-    items.sort(key=lambda item: (-item['_count'], item['username']))
+        return counts, connections
+    items = sorted(items, key=lambda i: (ACTIVITY_ORDER.get(i.get('state'), 9), -int(i.get('connected') or 0), i['username']))
     rows = []
-    online = 0
     for index, item in enumerate(items, 1):
-        count = item['_count']
-        limit = limits.get(item['username'], 0)
-        online += 1 if count else 0
-        color = ui.RED if limit and count > limit else (ui.GREEN if count else None)
-        extra = ', '.join(item.get('ips') or [])
-        if item.get('error'):
-            extra = 'gagal membaca API Xray'
-        rows.append([str(index), item['username'], ('{0}/{1}'.format(count, limit if limit else ui.UNLIMITED), color), extra])
+        state = item.get('state', 'error')
+        counts[state] = counts.get(state, 0) + 1
+        connected = int(item.get('connected') or 0)
+        connections += connected
+        limit = int(item.get('ip_limit') or 0)
+        over = bool(limit) and connected > limit
+        label, color = ACTIVITY_VIEW.get(state, (state, None))
+        usage = ('{0}/{1}'.format(connected, limit if limit else ui.UNLIMITED), ui.RED if over else None)
+        if ssh:
+            rows.append([str(index), item['username'], usage, (label, color), _rate(item, interval)])
+        else:
+            extra = 'API Xray gagal dibaca' if state == 'error' else ', '.join(item.get('ips') or [])
+            rows.append([str(index), item['username'], usage, (label, color), _rate(item, interval), extra])
     if ssh:
-        rows = [row[:3] for row in rows]
-        ui.write_lines(ui.table(['No', 'Username', 'Sesi/Lim'], rows, [3, 16, 9], right=(0, 2)))
+        ui.write_lines(ui.table(['No', 'Username', 'Sesi/Lim', 'Status', 'Laju'], rows, [3, 16, 9, 13, 9], right=(0, 2, 4)))
     else:
-        ui.write_lines(ui.table(['No', 'Username', 'IP/Limit', 'Alamat IP'], rows, [3, 16, 9, 45], right=(0, 2)))
-    ui.write('\nSedang online: {0} dari {1} akun aktif'.format(online, len(items)))
-    return online, len(items)
+        ui.write_lines(ui.table(['No', 'Username', 'IP/Lim', 'Status', 'Laju', 'Alamat IP'],
+                                rows, [3, 16, 7, 13, 9, 30], right=(0, 2, 4)))
+    return counts, connections
+
+
+def _summary(counts, connections, ssh_only=False):
+    connected = counts['active'] + counts['idle'] + counts['unmeasured']
+    unit = 'sesi' if ssh_only else 'IP/sesi'
+    ui.write(' Aktif trafik  : {0}'.format(counts['active']))
+    ui.write(' Idle          : {0}'.format(counts['idle']))
+    if counts['unmeasured']:
+        ui.write(' Belum terukur : {0}'.format(counts['unmeasured']))
+    ui.write(' Terhubung     : {0} akun ({1} {2})'.format(connected, connections, unit))
+    ui.write(' Offline       : {0}'.format(counts['offline']))
+    if counts['error']:
+        ui.write(ui.paint(' Gagal baca    : {0} (bukan berarti offline)'.format(counts['error']), ui.RED))
+
+
+def online_view(protocol=None, settings_override=None, backend=None):
+    """Menu 6 (semua protokol) dan menu protokol > 12. Data diambil sekali per tampilan/reload."""
+    protocols = [protocol] if protocol else list(ui.PROTOCOLS)
+    while True:
+        ui.clear()
+        ui.title('CEK USER ONLINE' + (' - ' + ui.PROTO_NAME[protocol].upper() if protocol else ' (SEMUA)'))
+        ui.write('Mengamati trafik beberapa detik...')
+        data = fetch_activity(protocol, settings_override, backend)
+        ui.clear()
+        ui.title('CEK USER ONLINE' + (' - ' + ui.PROTO_NAME[protocol].upper() if protocol else ' (SEMUA)'))
+        if data is None:
+            ui.fail('data online tidak bisa dibaca (lihat pesan di atas).')
+        else:
+            interval = data.get('interval') or 0
+            ui.write('Diamati {0} detik (pukul {1}).'.format(interval, ui.local_time(data.get('measured_at'), '%H:%M:%S')))
+            total = dict((state, 0) for state in ACTIVITY_ORDER)
+            total_connections = 0
+            for proto in protocols:
+                ui.write('')
+                items = [i for i in data['items'] if i.get('protocol') == proto]
+                counts, connections = render_activity(proto, items, interval)
+                total_connections += connections
+                for key, value in counts.items():
+                    total[key] = total.get(key, 0) + value
+            ui.write('')
+            ui.write(ui.paint('RINGKASAN', ui.CYAN))
+            _summary(total, total_connections, ssh_only=protocol == 'ssh')
+            if data.get('interfered'):
+                ui.note('Catatan: pencatat kuota atau restart Xray terjadi saat pengamatan; sebagian akun bisa '
+                        'tampil BELUM TERUKUR. Tekan 1 untuk mengulang.')
+            ui.note('IDLE = koneksi masih tercatat tetapi tanpa trafik ')
+        ui.write('')
+        ui.write(' 1. Reload')
+        ui.write(' 0. Kembali' + (' ke menu utama' if not protocol else ''))
+        while True:
+            choice = ui.ask('Pilih: ')
+            if choice == '1':
+                break
+            if choice in ('0', 'q', 'Q'):
+                return
+            ui.write('Pilih 1 atau 0.')
 
 
 # ---------------------------------------------------------------- detail
@@ -402,7 +475,8 @@ def account_menu(protocol, settings_override=None, backend=None):
         elif choice == '11':
             show_accounts(protocol, settings_override, backend, title='DAFTAR AKUN ' + name.upper())
         elif choice == '12':
-            show_online(protocol, settings_override, backend)
+            online_view(protocol, settings_override, backend)
+            continue
         elif choice == '13':
             days = ui.ask_int('Tampilkan yang habis dalam berapa hari? [3]: ', default=3)
             ui.clear()
@@ -411,13 +485,3 @@ def account_menu(protocol, settings_override=None, backend=None):
         else:
             ui.write('Pilihan tidak valid.')
         ui.pause()
-
-
-def online_all(settings_override=None, backend=None):
-    total_online = total = 0
-    for protocol in ui.PROTOCOLS:
-        online, count = show_online(protocol, settings_override, backend)
-        total_online += online
-        total += count
-        ui.write('')
-    ui.write(ui.paint('Total sedang online: {0} dari {1} akun aktif'.format(total_online, total), ui.CYAN))

@@ -6,6 +6,7 @@ from . import menu_backup
 from . import menu_info
 from . import menu_system
 from . import menu_telegram
+from . import menu_usage
 from . import menu_ui as ui
 
 HEADER_SERVICES = [('haproxy', 'HAProxy'), ('xray', 'Xray'), ('ws-epro', 'Ws-Epro'),
@@ -46,7 +47,7 @@ def _header(settings_override=None, backend=None):
 MAIN_ITEMS = [('1', 'Menu SSH WebSocket'), ('2', 'Menu VMess'), ('3', 'Menu VLESS'), ('4', 'Menu Trojan'),
               ('5', 'Menu Shadowsocks'), ('6', 'Cek user online (semua)'), ('7', 'Menu Sistem'),
               ('8', 'Backup & Restore'), ('9', 'Info port & path'), ('10', 'Ringkasan server'),
-              ('11', 'Telegram Gateway (bot)')]
+              ('11', 'Telegram Gateway (bot)'), ('12', 'Pemakaian trafik akun hari ini')]
 PROTOCOL_KEYS = {'1': 'ssh', '2': 'vmess', '3': 'vless', '4': 'trojan', '5': 'ss'}
 
 
@@ -72,11 +73,14 @@ def _loop(settings_override=None, backend=None):
         if choice == '11':
             menu_telegram.telegram_menu(settings_override, backend)
             continue
+        if choice == '6':  # punya loop sendiri: 1 = reload, 0 = kembali
+            menu_account.online_view(None, settings_override, backend)
+            continue
+        if choice == '12':
+            menu_usage.usage_menu(settings_override, backend)
+            continue
         ui.clear()
-        if choice == '6':
-            menu_account.online_all(settings_override, backend)
-            ui.pause()
-        elif choice == '9':
+        if choice == '9':
             menu_info.ports_info(settings_override, backend)
             ui.pause()
         elif choice == '10':

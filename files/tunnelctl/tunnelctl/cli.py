@@ -133,7 +133,16 @@ def build_parser():
 
     online = account_sub.add_parser('online')
     online.add_argument('--proto', choices=['ssh', 'vmess', 'vless', 'trojan', 'ss'])
+    online.add_argument('--activity', action='store_true',
+                        help='bedakan aktif trafik / idle dengan dua snapshot counter (tanpa reset)')
+    online.add_argument('--interval', type=float, help='lama pengamatan dalam detik (1-10, default 3)')
     online.add_argument('--json', action='store_true')
+
+    usage_top = account_sub.add_parser('usage-top')
+    usage_top.add_argument('--day', help='tanggal UTC YYYY-MM-DD (default: hari ini UTC)')
+    usage_top.add_argument('--limit', type=int, default=20)
+    usage_top.add_argument('--proto', choices=['ssh', 'vmess', 'vless', 'trojan', 'ss'])
+    usage_top.add_argument('--json', action='store_true')
 
     reset_usage = account_sub.add_parser('reset-usage')
     reset_usage.add_argument('--proto', required=True, choices=['ssh', 'vmess', 'vless', 'trojan', 'ss'])
@@ -461,7 +470,13 @@ def run(argv=None, settings_override=None, backend=None):
                 _print(manager.unlock(args.proto, args.user), as_json=args.json)
                 return EXIT_OK
             if cmd == 'online':
-                _print(manager.online(protocol=args.proto), as_json=args.json)
+                if args.activity:
+                    _print(manager.online_activity(protocol=args.proto, interval=args.interval), as_json=args.json)
+                else:
+                    _print(manager.online(protocol=args.proto), as_json=args.json)
+                return EXIT_OK
+            if cmd == 'usage-top':
+                _print(manager.usage_top(day=args.day, limit=args.limit, protocol=args.proto), as_json=args.json)
                 return EXIT_OK
             if cmd == 'reset-usage':
                 _print(manager.reset_usage(args.proto, args.user), as_json=args.json)
