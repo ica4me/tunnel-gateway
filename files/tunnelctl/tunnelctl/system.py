@@ -98,10 +98,18 @@ class SystemBackend:
     SERVICES = ('haproxy', 'xray', 'ws-epro', 'dropbear-tunnel', 'nginx', 'chrony', 'tunnel-firewall', 'vnstat')
     TIMERS = ('tunnel-usage.timer', 'tunnel-limit.timer', 'tunnel-expiry.timer', 'tunnel-backup.timer', 'tunnel-cert.timer')
 
-    def __init__(self, runner=None, check_root=True):
+    DROPBEAR_UNIT = 'dropbear-tunnel.service'
+    TUNNEL_GROUP = 'tunnelusers'
+    # Dropbear -E menulis ke stderr dengan format "[PID] tanggal pesan".
+    LOG_PID_RE = re.compile(r'^\s*\[([0-9]+)\]')
+    AUTH_RES = (re.compile(r"Password auth succeeded for '([^']+)'"),
+                re.compile(r'Password auth succeeded for ([a-z0-9_]+) from '))
+
+    def __init__(self, runner=None, check_root=True, proc_root='/proc'):
         self.runner = runner or self._run
         self.settings = {}
         self.check_root = check_root
+        self.proc_root = Path(proc_root)
 
     def _run(self, args, input=None, timeout: Optional[int]=60, capture=True, **kwargs):
         try:
@@ -258,48 +266,155 @@ class SystemBackend:
             return normalize_ips([item.get('ip') if isinstance(item, dict) else item for item in ips])
         return normalize_ips([ip for ip in (_parse_journal_line(line) for line in out.splitlines()) if ip])
 
+    # ------------------------------------------------------------ sesi SSH (Dropbear)
+    #
+    # Model proses dropbear-tunnel: satu proses utama (MainPID, root) yang mem-fork satu proses anak
+    # per koneksi. Sesi dihitung dari proses anak yang MASIH HIDUP, bukan dari baris log:
+    #   - anak dengan UID non-root  -> sudah login dan Dropbear sudah turun hak ke user itu;
+    #                                  username dibaca langsung dari UID (tanpa journal).
+    #   - anak dengan UID root      -> Dropbear tanpa drop-privilege, atau belum login. Username dicari di
+    #                                  journal lewat PID di awalan "[PID]" pesan Dropbear. _PID journal
+    #                                  untuk log stderr adalah PID proses utama, jadi tidak dipakai.
+    #   - waktu login dibandingkan dengan waktu start proses memakai jam monotonic sejak boot,
+    #     sehingga koreksi jam NTP tidak membuat sesi hilang.
+
+    @staticmethod
+    def _stat_fields(stat_text):
+        """Field /proc/PID/stat setelah nama proses: [0]=state, [1]=ppid, [19]=starttime."""
+        return stat_text[stat_text.rfind(')') + 2:].split()
+
+    def _boot_id(self):
+        return (self.proc_root / 'sys/kernel/random/boot_id').read_text().strip()
+
     def process_identity(self, pid):
+        """Identitas proses Dropbear (None jika bukan Dropbear atau sudah tidak ada)."""
         try:
-            proc = Path('/proc') / str(int(pid))
-            if Path(os.readlink(str(proc / 'exe'))).name != 'dropbear':
+            proc = self.proc_root / str(int(pid))
+            exe = os.readlink(str(proc / 'exe'))
+            # Setelah binary diganti (update), link berakhiran " (deleted)".
+            if Path(exe.replace(' (deleted)', '')).name != 'dropbear':
                 return None
-            stat = (proc / 'stat').read_text()
-            fields = stat[stat.rfind(')') + 2:].split()
-            start_ticks = fields[19]
+            fields = self._stat_fields((proc / 'stat').read_text())
             uid_line = next(line for line in (proc / 'status').read_text().splitlines() if line.startswith('Uid:'))
-            if int(uid_line.split()[1]) != 0:
-                return None
-            boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
-            return {'start_ticks': start_ticks, 'boot_id': boot}
+            uids = [int(value) for value in uid_line.split()[1:4]]
+            return {'start_ticks': fields[19], 'ppid': int(fields[1]),
+                    'uid': next((u for u in uids if u != 0), 0), 'boot_id': self._boot_id()}
         except (OSError, ValueError, StopIteration, IndexError):
             return None
 
-    def dropbear_sessions(self):
-        raw = self.runner(['journalctl', '-u', 'dropbear-tunnel.service', '-b', '-o', 'json', '--no-pager'])
-        sessions = {}
-        clock_ticks = os.sysconf('SC_CLK_TCK')
-        uptime = float(Path('/proc/uptime').read_text().split()[0])
-        boot_time = time.time() - uptime
+    def _dropbear_main_pid(self):
+        try:
+            return int(self.runner(['systemctl', 'show', self.DROPBEAR_UNIT, '-p', 'MainPID', '--value']).strip() or 0)
+        except (TunnelCtlError, ValueError):
+            return 0
+
+    def _dropbear_children(self, main_pid):
+        """Proses koneksi yang masih hidup: anak langsung dari proses utama dropbear-tunnel."""
+        children = []
+        if main_pid <= 0:
+            return children
+        try:
+            entries = list(self.proc_root.iterdir())
+        except OSError:
+            return children
+        for entry in entries:
+            if not entry.name.isdigit() or int(entry.name) == main_pid:
+                continue
+            try:
+                if int(self._stat_fields((entry / 'stat').read_text())[1]) != main_pid:
+                    continue
+            except (OSError, ValueError, IndexError):
+                continue
+            identity = self.process_identity(entry.name)
+            if identity is not None and identity['ppid'] == main_pid:
+                children.append(dict(identity, pid=int(entry.name)))
+        return children
+
+    def _tunnel_username(self, uid):
+        """Username untuk UID anggota grup tunnelusers; None untuk user lain."""
+        try:
+            record = pwd.getpwuid(uid)
+            group = grp.getgrnam(self.TUNNEL_GROUP)
+        except KeyError:
+            return None
+        if record.pw_uid == 0 or not (record.pw_gid == group.gr_gid or record.pw_name in group.gr_mem):
+            return None
+        return record.pw_name
+
+    @staticmethod
+    def _monotonic_to_boottime():
+        """Selisih CLOCK_BOOTTIME - CLOCK_MONOTONIC (waktu suspend); 0 di VPS pada umumnya."""
+        boottime = getattr(time, 'CLOCK_BOOTTIME', None)
+        if boottime is None:
+            return 0.0
+        try:
+            return max(0.0, time.clock_gettime(boottime) - time.clock_gettime(time.CLOCK_MONOTONIC))
+        except OSError:
+            return 0.0
+
+    def _auth_journal(self):
+        """{pid: {username, boot_seconds, boot_id}} dari log login sukses Dropbear sejak boot ini."""
+        raw = self.runner(['journalctl', '-u', self.DROPBEAR_UNIT, '-b', '-o', 'json', '--no-pager',
+                           '--output-fields=MESSAGE,_PID,_BOOT_ID'], timeout=90)
+        offset = self._monotonic_to_boottime()
+        found = {}
         for line in raw.splitlines():
             try:
                 entry = json.loads(line)
                 message = entry.get('MESSAGE', '')
-                match = re.search(r"Password auth succeeded for '([^']+)'", message)
-                if match is None:
-                    match = re.search(r'Password auth succeeded for ([a-z0-9_]+) from ', message)
-                if match is None:
+                if isinstance(message, list):  # journald memakai array byte untuk pesan non-UTF-8
+                    message = bytes(message).decode('utf-8', 'replace')
+                if 'auth succeeded' not in message:
                     continue
-                pid = int(entry['_PID'])
-                identity = self.process_identity(pid)
-                if identity is None or entry.get('_BOOT_ID', '').replace('-', '') != identity['boot_id'].replace('-', ''):
+                username = None
+                for pattern in self.AUTH_RES:
+                    match = pattern.search(message)
+                    if match:
+                        username = match.group(1)
+                        break
+                if username is None:
                     continue
-                auth_time = int(entry['__REALTIME_TIMESTAMP']) / 1000000.0
-                if auth_time < boot_time + int(identity['start_ticks']) / clock_ticks - 1:
-                    continue
-                sessions[pid] = dict(identity, pid=pid, username=match.group(1))
+                prefix = self.LOG_PID_RE.match(message)
+                pid = int(prefix.group(1)) if prefix else int(entry['_PID'])
+                found[pid] = {'username': username, 'boot_id': entry.get('_BOOT_ID', ''),
+                              'boot_seconds': int(entry['__MONOTONIC_TIMESTAMP']) / 1000000.0 + offset}
             except (ValueError, KeyError, TypeError):
                 continue
-        return list(sessions.values())
+        return found
+
+    def dropbear_sessions(self):
+        """Daftar sesi SSH tunnel yang sedang terhubung: [{pid, username, start_ticks, boot_id}]."""
+        main_pid = self._dropbear_main_pid()
+        sessions = []
+        pending = []
+        for child in self._dropbear_children(main_pid):
+            if child['uid'] != 0:
+                username = self._tunnel_username(child['uid'])
+                if username:
+                    sessions.append(dict(child, username=username))
+            else:
+                pending.append(child)
+        if pending:
+            journal = self._auth_journal()
+            clock_ticks = float(os.sysconf('SC_CLK_TCK'))
+            for child in pending:
+                auth = journal.get(child['pid'])
+                if auth is None:
+                    continue  # koneksi belum login (mis. bot/scan)
+                if auth['boot_id'] and auth['boot_id'].replace('-', '') != child['boot_id'].replace('-', ''):
+                    continue
+                # Log login harus terjadi setelah proses ini dibuat (mencegah PID daur ulang).
+                if auth['boot_seconds'] < int(child['start_ticks']) / clock_ticks - 2:
+                    continue
+                username = auth['username']
+                try:
+                    if self._managed_user(username) is None:
+                        continue
+                except Conflict:
+                    continue
+                sessions.append(dict(child, username=username))
+        return [{'pid': s['pid'], 'username': s['username'], 'start_ticks': s['start_ticks'],
+                 'boot_id': s['boot_id']} for s in sessions]
 
     def ssh_sessions(self, journal_lines=None, pid_table=None):
         if journal_lines is None:
@@ -307,22 +422,24 @@ class SystemBackend:
             for session in self.dropbear_sessions():
                 counts[session['username']] = counts.get(session['username'], 0) + 1
             return counts
-        # Fixture-only plain-text parser; live path requires journal boot/start checks.
+        # Fixture-only plain-text parser. UID tidak lagi harus 0: Dropbear modern turun hak ke user.
         counts = {}
         seen = set()
         for line in journal_lines:
-            match = re.search(r"dropbear\[([0-9]+)\]: Password auth succeeded for '?([a-z0-9_]+)'? from ", line)
-            if match and match.group(1) in pid_table and pid_table[match.group(1)]['uid'] == 0 and match.group(1) not in seen:
+            match = re.search(r"dropbear\[([0-9]+)\]: (?:\[[0-9]+\] .*?)?Password auth succeeded for '?([a-z0-9_]+)'? from ", line)
+            if match and match.group(1) in pid_table and match.group(1) not in seen:
                 seen.add(match.group(1))
                 counts[match.group(2)] = counts.get(match.group(2), 0) + 1
         return counts
 
     def disconnect_ssh(self, username):
+        main_pid = self._dropbear_main_pid()
         for session in self.dropbear_sessions():
-            if session['username'] != username:
+            if session['username'] != username or session['pid'] == main_pid:
                 continue
             identity = self.process_identity(session['pid'])
-            if identity and identity['start_ticks'] == session['start_ticks'] and identity['boot_id'] == session['boot_id']:
+            if (identity and identity['ppid'] == main_pid and identity['start_ticks'] == session['start_ticks']
+                    and identity['boot_id'] == session['boot_id']):
                 try:
                     os.kill(session['pid'], signal.SIGTERM)
                 except ProcessLookupError:

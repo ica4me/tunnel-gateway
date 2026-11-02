@@ -196,6 +196,46 @@ Folder `inventories/my-server/` berisi domain asli Anda — jangan di-commit ke 
 Jika penerbitan sertifikat gagal (DNS belum aktif / port 80 tertutup), perbaiki lalu jalankan ulang
 perintah yang sama, atau kosongkan `tunnel_domain` untuk instal dalam mode IP dan atur domain lewat menu.
 
+### Reconfigure / update server yang sudah berjalan
+
+Pakai langkah ini jika server **sudah berisi akun pelanggan** dan Anda ingin menerapkan ulang konfigurasi,
+misalnya setelah `git pull` atau setelah mengubah setelan di inventory.
+
+> [!IMPORTANT]
+> Inventory yang disalin dari `inventories/new-server/hosts.yml` masih berisi setelan instalasi baru:
+>
+> - `tunnelctl_fresh_install: true`
+> - `tunnelctl_accounts_imported: false`
+>
+> Setelan ini **tidak** langsung menghapus database akun, tetapi untuk server produksi lebih aman diubah
+> menjadi:
+>
+> - `tunnelctl_fresh_install: false`
+> - `tunnelctl_accounts_imported: true`
+
+```bash
+cd /root/tunnel-gateway
+git pull                                   # opsional: ambil versi terbaru
+
+tunnelctl backup create                    # disarankan: backup akun sebelum reconfigure
+
+INV=inventories/my-server/hosts.yml
+sed -i 's|^\(\s*tunnelctl_fresh_install:\s*\).*|\1false|'    "$INV"
+sed -i 's|^\(\s*tunnelctl_accounts_imported:\s*\).*|\1true|' "$INV"
+grep -E '^\s+tunnelctl_(fresh_install|accounts_imported):' "$INV"
+
+tmux new -s install                        # proses aman walau SSH terputus
+set -o pipefail
+bash bootstrap.sh inventories/my-server/hosts.yml 2>&1 | tee /root/install.log
+```
+
+- `set -o pipefail` membuat perintah di atas ikut **gagal** jika `bootstrap.sh` gagal. Tanpa ini, status
+  yang terbaca adalah status `tee`, yang selalu sukses.
+- Jika server dulu diinstal dengan inventory bawaan (`inventories/new-server/hosts.yml`), salin dulu ke
+  `inventories/my-server/hosts.yml` seperti di atas. Mengedit file bawaan langsung bisa bentrok saat
+  `git pull`.
+- Selalu pakai inventory yang sama dengan instalasi sebelumnya agar domain dan setelan tidak berubah.
+
 ### Opsi tambahan
 
 | Perintah | Fungsi |
@@ -253,6 +293,20 @@ Tambahkan di `hosts.yml` lalu jalankan ulang `bash bootstrap.sh`:
 | `tuning_disable_snapd` | `true` | Matikan snapd di Ubuntu (dilewati bila ada snap lain) |
 | `dropbear_legacy_algorithms` | `true` | Kompatibilitas aplikasi tunnel lama |
 | `ssh_admin_extra_ports` | `[]` | Port SSH admin tambahan |
+
+## 🐞 Laporkan Masalah
+
+Menemukan bug, error saat instalasi, atau punya saran fitur? Silakan buka issue di
+[github.com/ica4me/tunnel-gateway/issues](https://github.com/ica4me/tunnel-gateway/issues).
+
+Agar cepat ditangani, sertakan:
+
+- OS dan versinya (`cat /etc/os-release`) serta arsitektur (amd64/arm64),
+- langkah yang dijalankan dan pesan error yang muncul,
+- potongan `/root/install.log` dan output `tunnelctl doctor --json`.
+
+> [!WARNING]
+> Sebelum menempelkan log, samarkan dulu domain asli, IP server, password/UUID akun, dan token bot Telegram.
 
 ## 📄 Lisensi
 
