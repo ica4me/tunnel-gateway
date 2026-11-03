@@ -17,7 +17,7 @@ versions:
   wsepro:
     commit: f04d2f1a5c32273af96c4dfb0baa9ef5754757f9
     source_sha256: 351232825d49daca4f79e00ce69b85d6ea8241260fa500463a2d42b8c7c01d8c
-    patch_sha256: fbc86e2919fb490a557ea0f0e4185c53e22f75031ca563c4f8d5d717bebeb8d1
+    patch_sha256: 1e16ae8216c48120c6f2a80d6ee4db9372b3838d0a6bc0fd0418c8631019b652
   badvpn:
     version: 1.999.130
     commit: 752c6b492bc6866e8af8313a6e348d5e0370fe1f

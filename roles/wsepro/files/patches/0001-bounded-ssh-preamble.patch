@@ -29,7 +29,7 @@
 +	// A silent client gets the server banner after at most 500ms.
 +	_ = client.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 +	var head []byte
-+	for n := 1; n <= 8; n++ {
++	for n := 1; n <= 33; n++ {
 +		b, err := br.Peek(n)
 +		head = b
 +		if err != nil || !httpPrefix(b) || looksLikeHTTP(b) {
@@ -44,7 +44,7 @@
  		reqLine, headers, err := readHTTPHead(br)
  		if err != nil {
  			if p.verbose >= 1 {
-@@ -289,6 +293,16 @@
+@@ -289,6 +293,17 @@
  	wg.Add(2)
  	go func() {
  		defer wg.Done()
@@ -52,6 +52,7 @@
 +			// Parse only the client preamble. Stop before SSH identification;
 +			// the same buffered reader then relays every SSH byte unchanged.
 +			if err := discardPreamble(br); err != nil {
++                if p.verbose >= 1 { log.Printf("Preamble rejected from %s: %v", client.RemoteAddr(), err) }
 +				target.Close()
 +				client.Close()
 +				return
@@ -61,7 +62,7 @@
  		pipe(target, br, p.cfg.BufLen)
  		halfClose(target)
  	}()
-@@ -306,29 +320,82 @@
+@@ -306,41 +321,123 @@
  
  // readHTTPHead reads the request line and headers up to the blank line.
  // Header names are returned lower-cased.
@@ -140,11 +141,16 @@
 +	return readHTTPHeadBudget(br, &budget)
 +}
 +
++// Method tokens are bounded; extension methods do not need a whitelist.
++func validMethod(s string) bool {
++ if len(s)==0 || len(s)>32 { return false }
++ for _,c:=range s { if !((c>='A' && c<='Z') || c=='-') { return false } }
++ return true
++}
 +func httpPrefix(b []byte) bool {
-+	for _, m := range []string{"GET ", "POST ", "PUT ", "HEAD ", "OPTIONS ", "CONNECT ", "DELETE ", "PATCH ", "TRACE "} {
-+		if strings.HasPrefix(m, string(b)) { return true }
-+	}
-+	return false
++ s:=string(b)
++ if i:=strings.IndexByte(s,' ');i>=0 { return validMethod(s[:i]) }
++ return validMethod(s)
 +}
 +
 +func discardPreamble(br *bufio.Reader) error {
@@ -152,11 +158,39 @@
 +	for count := 0; count < 32; count++ {
 +		head, err := br.Peek(4)
 +		if err != nil { return err }
++        // A single optional injector marker is permitted; do not strip arbitrary bytes.
++        if head[0] == ']' {
++            br.ReadByte(); budget--
++            head, err = br.Peek(4)
++            if err != nil { return err }
++            if string(head) != "SSH-" { return fmt.Errorf("marker must precede SSH identification") }
++        }
 +		if string(head) == "SSH-" { return nil }
++        if string(head[:2])=="\r\n" {br.Discard(2);budget-=2;continue}
 +		if string(head) == "HTTP" {
 +			line, err := readPreambleLine(br, &budget)
 +			if err != nil { return err }
-+			if line != "HTTP/enhanced 200 Ok" { return fmt.Errorf("invalid enhanced preamble") }
++			fields := strings.Fields(line)
++            if len(fields)<2 || !(strings.EqualFold(fields[0],"HTTP/enhanced") || fields[0]=="HTTP/1.1" || fields[0]=="HTTP/1.0") || len(fields[1])!=3 || fields[1][0]<'1' || fields[1][0]>'5' || fields[1][1]<'0' || fields[1][1]>'9' || fields[1][2]<'0' || fields[1][2]>'9' { return fmt.Errorf("invalid enhanced preamble") }
++            // A status-only injector marker or a bounded HTTP header block.
++            for {
++                next, e := br.Peek(4)
++                if e!=nil { return e }
++                if string(next)=="SSH-" || string(next)=="HTTP" || next[0]==']' { break }
++                if string(next[:2])=="\r\n" { br.Discard(2);budget-=2;break }
++                isRequest:=false
++                for n:=4;n<=33;n++ {
++                    prefix,e:=br.Peek(n);if e!=nil{return e}
++                    if strings.Contains(string(prefix),":") || strings.Contains(string(prefix),"\r") {break}
++                    if i:=strings.IndexByte(string(prefix),' ');i>=0 {isRequest=validMethod(string(prefix[:i]));break}
++                }
++                if isRequest {break}
++                h,e:=readPreambleLine(br,&budget);if e!=nil{return e}
++                if h==""{break}
++                i:=strings.IndexByte(h,':');if i<=0{return fmt.Errorf("invalid status header")}
++                name:=strings.ToLower(strings.TrimSpace(h[:i]));val:=strings.TrimSpace(h[i+1:])
++                if name=="transfer-encoding" || (name=="content-length" && val!="0"){return fmt.Errorf("status bodies not supported")}
++            }
 +		} else {
 +			_, _, err := readHTTPHeadBudget(br, &budget)
 +			if err != nil { return err }
@@ -166,3 +200,18 @@
  }
  
  // looksLikeHTTP reports whether the peeked bytes begin with a common
+ // HTTP request method, i.e. an injector-style upgrade request.
+ func looksLikeHTTP(b []byte) bool {
+-	s := string(b)
+-	for _, m := range []string{"GET ", "POST ", "PUT ", "HEAD ", "OPTIONS", "CONNECT", "DELETE ", "PATCH ", "TRACE "} {
+-		if strings.HasPrefix(s, m) {
+-			return true
+-		}
+-	}
+-	return false
++ s:=string(b)
++ i:=strings.IndexByte(s,' ')
++ return i>0 && validMethod(s[:i])
+ }
+ 
+ func calculateWebSocketAccept(key string) string {

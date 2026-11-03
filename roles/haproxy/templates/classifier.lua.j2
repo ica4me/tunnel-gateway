@@ -5,7 +5,7 @@ core.register_fetches("tunnel_route", function(txn)
     if not ok or data == nil then data = txn.req:dup() end
     data = data or ""
     if data:sub(1, 4) == "SSH-" then return "ssh" end
-    local method, path = data:match("^([A-Z]+) ([^ ]+) HTTP/1%.[01]\r\n")
+    local method, path = data:match("^([A-Z%-]+) ([^ ]+) HTTP/1%.[01]\r\n")
     if not method then return "ws" end
     if path:match("^/%.well%-known/acme%-challenge/") then return "acme" end
     local routes = {
@@ -18,6 +18,13 @@ core.register_fetches("tunnel_route", function(txn)
       if path == prefix or path:sub(1,#prefix+1) == prefix.."/" or path:sub(1,#prefix+1) == prefix.."?" then
         return proto
       end
+    end
+    -- Keep-alive preambles may be followed by a delayed Upgrade request.
+    -- Preserve ordinary web GETs and ACME/Xray routes above.
+    local firstEnd = data:find("\r\n\r\n",1,true)
+    local firstHead = firstEnd and data:sub(1,firstEnd-1):lower() or ""
+    if firstHead:find("\r\nconnection:%s*keep%-alive") or path == "/cdn-cgi/trace" then
+      return "ws"
     end
     local pos = data:find("\r\n\r\n",1,true)
     if pos and pos+3 == #data and not data:lower():find("upgrade",1,true) then
